@@ -104,17 +104,23 @@ svp_event_associate(svp_event_t *sep, int fd)
 	return (ret);
 }
 
-/* ARGSUSED */
+/*
+ * Remove a file descriptor from the SVP event port.
+ *
+ * This will return either success (0) or already-dissociated (ENOENT).
+ * We panic here without returning if the underlying system has a problem.
+ */
 int
-svp_event_dissociate(svp_event_t *sep, int fd)
+svp_event_dissociate(int fd)
 {
 	int ret;
 
 	ret = port_dissociate(svp_event.sel_port, PORT_SOURCE_FD, fd);
 	if (ret != 0) {
-		if (errno != ENOENT)
+		if (errno != ENOENT) {
 			libvarpd_panic("unexpected port_dissociate error: %d",
 			    errno);
+		}
 		ret = errno;
 	}
 	return (ret);

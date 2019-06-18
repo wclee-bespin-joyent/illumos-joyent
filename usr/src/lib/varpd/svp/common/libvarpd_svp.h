@@ -306,7 +306,7 @@ extern void svp_timer_remove(svp_timer_t *);
  * Event loop management
  */
 extern int svp_event_associate(svp_event_t *, int);
-extern int svp_event_dissociate(svp_event_t *, int);
+extern int svp_event_dissociate(int);
 extern int svp_event_inject(svp_event_t *);
 
 /*

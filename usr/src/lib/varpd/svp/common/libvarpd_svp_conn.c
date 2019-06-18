@@ -654,8 +654,7 @@ svp_conn_reset(svp_conn_t *scp)
 	assert(MUTEX_HELD(&srp->sr_lock));
 	assert(MUTEX_HELD(&scp->sc_lock));
 
-	assert(svp_event_dissociate(&scp->sc_event, scp->sc_socket) ==
-	    ENOENT);
+	VERIFY(svp_event_dissociate(scp->sc_socket) == ENOENT);
 	if (close(scp->sc_socket) != 0)
 		libvarpd_panic("failed to close socket %d: %d", scp->sc_socket,
 		    errno);
@@ -854,11 +853,12 @@ svp_conn_querytimer(void *arg)
 	 */
 	scp->sc_flags |= SVP_CF_TEARDOWN;
 
-	ret = svp_event_dissociate(&scp->sc_event, scp->sc_socket);
-	if (ret == 0)
+	/*
+	 * svp_event_dissociate guarantees either "lose the disassociate"
+	 * (ENOENT) or successful dissociation (0). It panics itself otherwise.
+	 */
+	if (svp_event_dissociate(scp->sc_socket) == 0)
 		svp_conn_inject(scp);
-	else
-		VERIFY(ret == ENOENT);
 
 	mutex_exit(&scp->sc_lock);
 }
@@ -979,8 +979,6 @@ svp_conn_create(svp_remote_t *srp, const struct in6_addr *addr)
 void
 svp_conn_destroy(svp_conn_t *scp)
 {
-	int ret;
-
 	mutex_enter(&scp->sc_lock);
 	if (scp->sc_cstate != SVP_CS_ERROR)
 		libvarpd_panic("asked to tear down an active connection");
@@ -991,11 +989,9 @@ svp_conn_destroy(svp_conn_t *scp)
 		libvarpd_panic("asked to remove a connection with non-empty "
 		    "query list");
 
-	if ((ret = svp_event_dissociate(&scp->sc_event, scp->sc_socket)) !=
-	    ENOENT) {
-		libvarpd_panic("dissociate failed or was actually "
-		    "associated: %d", ret);
-	}
+	if (svp_event_dissociate(scp->sc_socket) == 0)
+		libvarpd_panic("removed connection was actually associated.");
+
 	mutex_exit(&scp->sc_lock);
 
 	/* Verify our timers are killed */
