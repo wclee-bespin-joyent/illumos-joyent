@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
  */
 
 /*
@@ -26,7 +26,11 @@ uint32_t smb2srv_capabilities =
 	SMB2_CAP_DFS |
 	SMB2_CAP_LEASING |
 	SMB2_CAP_LARGE_MTU |
+	SMB2_CAP_PERSISTENT_HANDLES |
 	SMB2_CAP_ENCRYPTION;
+
+/* These are the only capabilities defined for SMB2.X */
+#define	SMB_2X_CAPS (SMB2_CAP_DFS | SMB2_CAP_LEASING | SMB2_CAP_LARGE_MTU)
 
 /*
  * These are not intended as customer tunables, but dev. & test folks
@@ -63,13 +67,14 @@ uint32_t smb2_old_rwsize = (1<<16);	/* 64KB */
 
 /*
  * List of all SMB2 versions we implement.  Note that the
- * highest version we support may be limited by the
- * _cfg.skc_max_protocol setting.
+ * versions we support may be limited by the
+ * _cfg.skc_max_protocol and min_protocol settings.
  */
 static uint16_t smb2_versions[] = {
 	0x202,	/* SMB 2.002 */
 	0x210,	/* SMB 2.1 */
 	0x300,	/* SMB 3.0 */
+	0x302,	/* SMB 3.02 */
 };
 static uint16_t smb2_nversions =
     sizeof (smb2_versions) / sizeof (smb2_versions[0]);
@@ -79,7 +84,8 @@ smb2_supported_version(smb_session_t *s, uint16_t version)
 {
 	int i;
 
-	if (version > s->s_cfg.skc_max_protocol)
+	if (version > s->s_cfg.skc_max_protocol ||
+	    version < s->s_cfg.skc_min_protocol)
 		return (B_FALSE);
 	for (i = 0; i < smb2_nversions; i++)
 		if (version == smb2_versions[i])
@@ -119,7 +125,7 @@ smb1_negotiate_smb2(smb_request_t *sr)
 	 */
 	switch (negprot->ni_dialect) {
 	case DIALECT_SMB2002:	/* SMB 2.002 (a.k.a. SMB2.0) */
-		smb2_version = 0x202;
+		smb2_version = SMB_VERS_2_002;
 		s->dialect = smb2_version;
 		s->s_state = SMB_SESSION_STATE_NEGOTIATED;
 		/* Allow normal SMB2 requests now. */
@@ -254,8 +260,13 @@ smb2_newrq_negotiate(smb_request_t *sr)
 	 * We walk the array and pick the highest supported.
 	 */
 	best_version = smb2_find_best_dialect(s, cl_versions, version_cnt);
-	if (best_version == 0)
-		return (SDRC_DROP_VC);
+	if (best_version == 0) {
+		cmn_err(CE_NOTE, "clnt %s no supported dialect",
+		    sr->session->ip_addr_str);
+		sr->smb2_status = NT_STATUS_INVALID_PARAMETER;
+		rc = -1;
+		goto errout;
+	}
 	s->dialect = best_version;
 
 	/* Allow normal SMB2 requests now. */
@@ -264,6 +275,7 @@ smb2_newrq_negotiate(smb_request_t *sr)
 
 	rc = smb2_negotiate_common(sr, best_version);
 
+errout:
 	/* sr->smb2_status was set */
 	DTRACE_SMB2_DONE(op__Negotiate, smb_request_t *, sr);
 
@@ -343,16 +355,26 @@ smb2_negotiate_common(smb_request_t *sr, uint16_t version)
 	/*
 	 * [MS-SMB2] 3.3.5.4 Receiving an SMB2 NEGOTIATE Request
 	 *
-	 * Only set CAP_ENCRYPTION if this is 3.0 or 3.0.2 and
-	 * the client has it set.
+	 * The SMB2.x capabilities are returned without regard for
+	 * what capabilities the client provided in the request.
+	 * The SMB3.x capabilities returned are the traditional
+	 * logical AND of server and client capabilities.
+	 *
+	 * One additional check: If KCF is missing something we
+	 * require for encryption, turn off that capability.
 	 */
-
-	if (s->dialect < SMB_VERS_3_0 ||
-	    !SMB3_CLIENT_ENCRYPTS(sr) ||
-	    smb3_encrypt_init_mech(s) != 0)
-		s->srv_cap = smb2srv_capabilities & ~SMB2_CAP_ENCRYPTION;
-	else
-		s->srv_cap = smb2srv_capabilities;
+	if (s->dialect < SMB_VERS_3_0) {
+		/* SMB 2.x */
+		s->srv_cap = smb2srv_capabilities & SMB_2X_CAPS;
+	} else {
+		/* SMB 3.0 or later */
+		s->srv_cap = smb2srv_capabilities &
+		    (SMB_2X_CAPS | s->capabilities);
+		if ((s->srv_cap & SMB2_CAP_ENCRYPTION) != 0 &&
+		    smb3_encrypt_init_mech(s) != 0) {
+			s->srv_cap &= ~SMB2_CAP_ENCRYPTION;
+		}
+	}
 
 	/*
 	 * See notes above smb2_max_rwsize, smb2_old_rwsize

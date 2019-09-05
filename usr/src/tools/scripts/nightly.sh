@@ -354,6 +354,29 @@ function build {
 }
 
 #
+# Bootstrap build tools which are pre-requisites for the rest of the build.
+#
+function bootstrap_tools {
+	echo "\n==== Bootstrapping tools at `date` ====\n" >> $LOGFILE
+
+	typeset INSTALLOG=install-bootstrap-${MACH}
+
+	rm -f $TMPDIR/make-state ${TOOLS}/$INSTALLOG.out
+	cd ${TOOLS}
+	/bin/time $MAKE -K $TMPDIR/make-state -e TARGET=install bootstrap \
+	    2>&1 | tee -a ${TOOLS}/$INSTALLOG.out >> $LOGFILE
+
+	echo "\n==== Bootstrap build errors ====\n" >> $mail_msg_file
+
+	egrep ":" ${TOOLS}/$INSTALLOG.out |
+	    egrep -e "(${MAKE}:|[ 	]error[: 	\n])" | \
+	    egrep -v warning | tee $TMPDIR/bootstrap_errors >> $mail_msg_file
+
+	[[ -s $TMPDIR/bootstrap_errors ]] && return 1
+	return 0
+}
+
+#
 # Build and install the onbld tools.
 #
 # usage: build_tools DESTROOT
@@ -1520,14 +1543,22 @@ fi
 [[ -d "${CODEMGR_WS}" ]] || fatal_error "Error: ${CODEMGR_WS} is not a directory."
 [[ -f "${CODEMGR_WS}/usr/src/Makefile" ]] || fatal_error "Error: ${CODEMGR_WS}/usr/src/Makefile not found."
 
+TMPFILE=/tmp/tmp.nightly.$$
+if [[ -n "${BUILDVERSION_EXEC}" ]]; then
+	${BUILDVERSION_EXEC} >$TMPFILE || \
+	    fatal_error "${BUILDVERSION_EXEC} failed"
+else
+	echo "version unset" >$TMPFILE
+fi
+
+if ! cmp $TMPFILE $SRC/buildversion >/dev/null 2>&1; then
+	mv $TMPFILE $SRC/buildversion
+fi
+rm -f $TMPFILE
+
 if [[ "$t_FLAG" = "y" ]]; then
-	echo "\n==== Bootstrapping cw ====\n" >> $LOGFILE
-	( cd ${TOOLS}
-	  set_non_debug_build_flags
-	  rm -f $TMPDIR/make-state
-	  $MAKE -K $TMPDIR/make-state -e TARGET=install cw 2>&1 >> $LOGFILE
-	  [[ "$?" -ne 0 ]] && fatal_error "Error: could not bootstrap cw"
-	)
+	set_non_debug_build_flags
+	bootstrap_tools || fatal_error "Error: could not bootstrap tools"
 
 	# Switch ONBLD_TOOLS early if -t is specified so that
 	# we could use bootstrapped cw for compiler checks.

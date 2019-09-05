@@ -25,7 +25,7 @@
  * Copyright 2017 Nexenta Systems, Inc.
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright 2016 Toomas Soome <tsoome@me.com>
- * Copyright 2017 Joyent, Inc.
+ * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017, Intel Corporation.
  */
 
@@ -634,7 +634,8 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 			alloc_bias = vdev_derive_alloc_bias(bias);
 
 			/* spa_vdev_add() expects feature to be enabled */
-			if (spa->spa_load_state != SPA_LOAD_CREATE &&
+			if (alloc_bias != VDEV_BIAS_LOG &&
+			    spa->spa_load_state != SPA_LOAD_CREATE &&
 			    !spa_feature_is_enabled(spa,
 			    SPA_FEATURE_ALLOCATION_CLASSES)) {
 				return (SET_ERROR(ENOTSUP));
@@ -4229,9 +4230,21 @@ vdev_is_bootable(vdev_t *vd)
 
 		if (strcmp(vdev_type, VDEV_TYPE_ROOT) == 0 &&
 		    vd->vdev_children > 1) {
-			return (B_FALSE);
-		} else if (strcmp(vdev_type, VDEV_TYPE_MISSING) == 0 ||
-		    strcmp(vdev_type, VDEV_TYPE_INDIRECT) == 0) {
+			int non_indirect = 0;
+
+			for (int c = 0; c < vd->vdev_children; c++) {
+				vdev_type =
+				    vd->vdev_child[c]->vdev_ops->vdev_op_type;
+				if (strcmp(vdev_type, VDEV_TYPE_INDIRECT) != 0)
+					non_indirect++;
+			}
+			/*
+			 * non_indirect > 1 means we have more than one
+			 * top-level vdev, so we stop here.
+			 */
+			if (non_indirect > 1)
+				return (B_FALSE);
+		} else if (strcmp(vdev_type, VDEV_TYPE_MISSING) == 0) {
 			return (B_FALSE);
 		}
 	}

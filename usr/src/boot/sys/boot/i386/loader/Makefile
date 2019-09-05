@@ -12,6 +12,7 @@
 #
 # Copyright 2015 Toomas Soome <tsoome@me.com>
 # Copyright 2016 RackTop Systems.
+# Copyright 2019 Joyent, Inc.
 #
 
 include $(SRC)/Makefile.master
@@ -58,7 +59,7 @@ SRCS +=	boot.c commands.c console.c devopen.c interp.c
 SRCS +=	interp_backslash.c interp_parse.c ls.c misc.c
 SRCS +=	module.c linenoise.c multiboot2.c
 SRCS +=	zfs_cmd.c
-SRCS +=	font.c $(FONT).c list.c tem.c
+SRCS +=	font.c $(FONT).c tem.c
 
 tem.o := CPPFLAGS += $(DEFAULT_CONSOLE_COLOR)
 
@@ -163,9 +164,6 @@ install: all $(ROOT_BOOT_DEFAULTS) $(ROOT_BOOT_FORTH) \
 %.o:	../../common/linenoise/%.c
 	$(COMPILE.c) -o $@ $<
 
-%.o: $(SRC)/common/list/%.c
-	$(COMPILE.c) -DNDEBUG $<
-
 %.o: $(SRC)/common/font/%.c
 	$(COMPILE.c) $<
 
@@ -177,6 +175,11 @@ $(ROOT_BOOT)/%: ../../forth/% $(ROOT_BOOT)
 
 $(ROOT_BOOT_DEFAULTS)/%: ../../forth/% $(ROOT_BOOT_DEFAULTS)
 	$(INS.file)
+
+$(ROOT_BOOT_FORTH)/menu.rc: ../../forth/joyent.menu.rc $(ROOT_BOOT_FORTH)
+	$(RM) $@; \
+	$(INS) -s -m $(FILEMODE) -f $(@D) ../../forth/joyent.menu.rc; \
+	$(MV) $(@D)/joyent.menu.rc $@
 
 $(ROOT_BOOT_FORTH)/%: ../../forth/% $(ROOT_BOOT_FORTH)
 	$(INS.file)

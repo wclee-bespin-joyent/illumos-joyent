@@ -263,6 +263,8 @@ libzfs_error_description(libzfs_handle_t *hdl)
 	case EZFS_NO_INITIALIZE:
 		return (dgettext(TEXT_DOMAIN, "there is no active "
 		    "initialization"));
+	case EZFS_WRONG_PARENT:
+		return (dgettext(TEXT_DOMAIN, "invalid parent dataset"));
 	case EZFS_NO_RESILVER_DEFER:
 		return (dgettext(TEXT_DOMAIN, "this action requires the "
 		    "resilver_defer feature"));
@@ -722,10 +724,12 @@ void
 libzfs_fini(libzfs_handle_t *hdl)
 {
 	(void) close(hdl->libzfs_fd);
-	if (hdl->libzfs_mnttab)
+	if (hdl->libzfs_mnttab != NULL)
 		(void) fclose(hdl->libzfs_mnttab);
-	if (hdl->libzfs_sharetab)
+	if (hdl->libzfs_sharetab != NULL)
 		(void) fclose(hdl->libzfs_sharetab);
+	if (hdl->libzfs_devlink != NULL)
+		(void) di_devlink_fini(&hdl->libzfs_devlink);
 	zfs_uninit_libshare(hdl);
 	zpool_free_handles(hdl);
 	libzfs_fru_clear(hdl, B_TRUE);

@@ -15,6 +15,7 @@
 
 /*
  * Copyright (c) 2017, Datto, Inc. All rights reserved.
+ * Copyright 2019 Joyent, Inc.
  */
 
 #include <string.h>
@@ -25,9 +26,9 @@
 #include <sys/fs/zfs.h>
 #include <sys/dsl_crypt.h>
 #ifdef sun
-#include <kmfapi.h>
-#include <security/pkcs11.h>
-#include <cryptoutil.h>
+#include <stdlib.h>
+#include <security/cryptoki.h>
+#include <cryptoutil.h> /* for pkcs11_strerror */
 #else
 #include <sys/crypto/icp.h>
 #endif
@@ -573,13 +574,7 @@ populate_create_encryption_params_nvlists(libzfs_handle_t *hdl,
 	/* passphrase formats require a salt and pbkdf2 iters property */
 	if (keyformat == ZFS_KEYFORMAT_PASSPHRASE) {
 #ifdef sun
-		/* always generate a new salt */
-		ret = pkcs11_get_random(&salt, sizeof (uint64_t));
-		if (ret != 0) {
-			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-			    "Failed to generate salt."));
-			goto error;
-		}
+		arc4random_buf(&salt, sizeof (salt));
 #else
 		random_init();
 
@@ -719,7 +714,8 @@ zfs_crypto_get_encryption_root(zfs_handle_t *zhp, boolean_t *is_encroot,
 
 int
 zfs_crypto_create(libzfs_handle_t *hdl, char *parent_name, nvlist_t *props,
-    nvlist_t *pool_props, uint8_t **wkeydata_out, uint_t *wkeylen_out)
+    nvlist_t *pool_props, boolean_t stdin_available, uint8_t **wkeydata_out,
+    uint_t *wkeylen_out)
 {
 	int ret;
 	uint64_t crypt = ZIO_CRYPT_INHERIT, pcrypt = ZIO_CRYPT_INHERIT;
@@ -848,6 +844,17 @@ zfs_crypto_create(libzfs_handle_t *hdl, char *parent_name, nvlist_t *props,
 	 * encryption root. Populate the encryption params.
 	 */
 	if (keylocation != NULL) {
+		/*
+		 * 'zfs recv -o keylocation=prompt' won't work because stdin
+		 * is being used by the send stream, so we disallow it.
+		 */
+		if (!stdin_available && strcmp(keylocation, "prompt") == 0) {
+			ret = EINVAL;
+			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "Cannot use "
+			    "'prompt' keylocation because stdin is in use."));
+			goto out;
+		}
+
 		ret = populate_create_encryption_params_nvlists(hdl, NULL,
 		    B_FALSE, keyformat, keylocation, props, &wkeydata,
 		    &wkeylen);

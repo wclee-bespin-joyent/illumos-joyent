@@ -2209,7 +2209,7 @@ dbuf_assign_arcbuf(dmu_buf_impl_t *db, arc_buf_t *buf, dmu_tx_t *tx)
 	ASSERT(db->db_level == 0);
 	ASSERT3U(dbuf_is_metadata(db), ==, arc_is_metadata(buf));
 	ASSERT(buf != NULL);
-	ASSERT(arc_buf_lsize(buf) == db->db.db_size);
+	ASSERT3U(arc_buf_lsize(buf), ==, db->db.db_size);
 	ASSERT(tx->tx_txg != 0);
 
 	arc_return_buf(buf, db);
@@ -2378,7 +2378,7 @@ dbuf_destroy(dmu_buf_impl_t *db)
 /*
  * Note: While bpp will always be updated if the function returns success,
  * parentp will not be updated if the dnode does not have dn_dbuf filled in;
- * this happens when the dnode is the meta-dnode, or a userused or groupused
+ * this happens when the dnode is the meta-dnode, or {user|group|project}used
  * object.
  */
 static int

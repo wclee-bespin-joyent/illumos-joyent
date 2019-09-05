@@ -148,6 +148,34 @@
 .Oo Fl t Ar type Ns Oo , Ns Ar type Oc Ns ... Oc
 .Ar filesystem Ns | Ns Ar snapshot
 .Nm
+.Cm projectspace
+.Op Fl Hp
+.Oo Fl o Ar field Ns Oo , Ns Ar field Oc Ns ... Oc
+.Oo Fl s Ar field Oc Ns ...
+.Oo Fl S Ar field Oc Ns ...
+.Ar filesystem Ns | Ns Ar snapshot
+.Nm
+.Cm project
+.Oo Fl d Ns | Ns Fl r Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Nm
+.Cm project
+.Fl C
+.Oo Fl kr Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Nm
+.Cm project
+.Fl c
+.Oo Fl 0 Ns Oc
+.Oo Fl d Ns | Ns Fl r Ns Oc
+.Op Fl p Ar id
+.Ar file Ns | Ns Ar directory Ns ...
+.Nm
+.Cm project
+.Op Fl p Ar id
+.Oo Fl rs Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Nm
 .Cm mount
 .Nm
 .Cm mount
@@ -169,12 +197,12 @@
 .Ar snapshot bookmark
 .Nm
 .Cm send
-.Op Fl DLPRcenpvw
+.Op Fl DLPRbcehnpvw
 .Op Oo Fl I Ns | Ns Fl i Oc Ar snapshot
 .Ar snapshot
 .Nm
 .Cm send
-.Op Fl Lce
+.Op Fl LPcenvw
 .Op Fl i Ar snapshot Ns | Ns Ar bookmark
 .Ar filesystem Ns | Ns Ar volume Ns | Ns Ar snapshot
 .Nm
@@ -183,14 +211,18 @@
 .Fl t Ar receive_resume_token
 .Nm
 .Cm receive
-.Op Fl Fnsuv
+.Op Fl Fhnsuv
 .Op Fl o Sy origin Ns = Ns Ar snapshot
+.Op Fl o Ar property Ns = Ns Ar value
+.Op Fl x Ar property
 .Ar filesystem Ns | Ns Ar volume Ns | Ns Ar snapshot
 .Nm
 .Cm receive
-.Op Fl Fnsuv
+.Op Fl Fhnsuv
 .Op Fl d Ns | Ns Fl e
 .Op Fl o Sy origin Ns = Ns Ar snapshot
+.Op Fl o Ar property Ns = Ns Ar value
+.Op Fl x Ar property
 .Ar filesystem
 .Nm
 .Cm receive
@@ -843,6 +875,24 @@ forms:
 .Sy S-1-123-456-789
 .Pc
 .El
+.It Sy userobjused Ns @ Ns Em user
+The
+.Sy userobjused
+property is similar to
+.Sy userused
+but instead it counts the number of objects consumed by a user.
+This property counts all objects allocated on behalf of the user, it may
+differ from the results of system tools such as
+.Nm df Fl i .
+.Pp
+When the property
+.Sy xattr=on
+is set on a file system additional objects will be created per-file to store
+extended attributes.
+These additional objects are reflected in the
+.Sy userobjused
+value and are counted against the user's
+.Sy userobjquota .
 .It Sy userrefs
 This property is set to the number of user holds on this snapshot.
 User holds are set by using the
@@ -862,6 +912,66 @@ The root user, or a user who has been granted the
 privilege with
 .Nm zfs Cm allow ,
 can access all groups' usage.
+.It Sy groupobjused Ns @ Ns Em group
+The number of objects consumed by the specified group in this dataset.
+Multiple objects may be charged to the group for each file when extended
+attributes are in use.
+See the
+.Sy userobjused Ns @ Ns Em user
+property for more information.
+.Pp
+Unprivileged users can only access their own groups' space usage.
+The root user, or a user who has been granted the
+.Sy groupobjused
+privilege with
+.Nm zfs Cm allow ,
+can access all groups' usage.
+.It Sy projectused Ns @ Ns Em project
+The amount of space consumed by the specified project in this dataset.
+Project is identified via the project identifier (ID) that is object-based
+numeral attribute.
+An object can inherit the project ID from its parent object (if the
+parent has the flag of inherit project ID that can be set and changed via
+.Nm zfs project Fl s )
+when being created.
+The privileged user can set and change object's project
+ID via
+.Nm zfs project Fl s
+anytime.
+Space is charged to the project of each file, as displayed by
+.Nm zfs project .
+See the
+.Sy userused Ns @ Ns Em user
+property for more information.
+.Pp
+The root user, or a user who has been granted the
+.Sy projectused
+privilege with
+.Nm zfs allow ,
+can access all projects' usage.
+.It Sy projectobjused Ns @ Ns Em project
+The
+.Sy projectobjused
+is similar to
+.Sy projectused
+but instead it counts the number of objects consumed by project.
+When the property
+.Sy xattr=on
+is set on a fileset, ZFS will create additional objects per-file to store
+extended attributes.
+These additional objects are reflected in the
+.Sy projectobjused
+value and are counted against the project's
+.Sy projectobjquota .
+See the
+.Sy userobjused Ns @ Ns Em user
+property for more information.
+.Pp
+The root user, or a user who has been granted the
+.Sy projectobjused
+privilege with
+.Nm zfs allow ,
+can access all projects' objects usage.
 .It Sy volblocksize
 For volumes, specifies the block size of the volume.
 The
@@ -1405,6 +1515,15 @@ symbol, using one of the following forms:
 .Sy S-1-123-456-789
 .Pc
 .El
+.It Sy userobjquota@ Ns Em user Ns = Ns Em size Ns | Ns Sy none
+The
+.Sy userobjquota
+is similar to
+.Sy userquota
+but it limits the number of objects a user can create.
+Please refer to
+.Sy userobjused
+for more information about how objects are counted.
 .It Sy groupquota@ Ns Em group Ns = Ns Em size Ns | Ns Sy none
 Limits the amount of space consumed by the specified group.
 Group space consumption is identified by the
@@ -1417,6 +1536,38 @@ The root user, or a user who has been granted the
 privilege with
 .Nm zfs Cm allow ,
 can get and set all groups' quotas.
+.It Sy groupobjquota@ Ns Em group Ns = Ns Em size Ns | Ns Sy none
+The
+.Sy groupobjquota
+is similar to
+.Sy groupquota
+but it limits the number of objects a group can consume.
+Please refer to
+.Sy userobjused
+for more information about how objects are counted.
+.It Sy projectquota@ Ns Em project Ns = Ns Em size Ns | Ns Sy none
+Limits the amount of space consumed by the specified project.
+Project space consumption is identified by the
+.Sy projectused@ Ns Em project
+property.
+Please refer to
+.Sy projectused
+for more information about how project is identified and set or changed.
+.Pp
+The root user, or a user who has been granted the
+.Sy projectquota
+privilege with
+.Nm zfs allow ,
+can access all projects' quotas.
+.It Sy projectobjquota@ Ns Em project Ns = Ns Em size Ns | Ns Sy none
+The
+.Sy projectobjquota
+is similar to
+.Sy projectquota
+but it limits the number of objects a project can consume.
+Please refer to
+.Sy userobjused
+for more information about how objects are counted.
 .It Sy readonly Ns = Ns Sy on Ns | Ns Sy off
 Controls whether this dataset can be modified.
 The default value is
@@ -2826,9 +2977,11 @@ Upgrade the specified file system and all descendent file systems.
 Displays space consumed by, and quotas on, each user in the specified filesystem
 or snapshot.
 This corresponds to the
-.Sy userused@ Ns Em user
+.Sy userused@ Ns Em user ,
+.Sy userobjused@ Ns Em user ,
+.Sy userquota@ Ns Em user,
 and
-.Sy userquota@ Ns Em user
+.Sy userobjquota@ Ns Em user
 properties.
 .Bl -tag -width "-H"
 .It Fl H
@@ -2909,6 +3062,118 @@ This subcommand is identical to
 .Nm zfs Cm userspace ,
 except that the default types to display are
 .Fl t Sy posixgroup Ns \&, Ns Sy smbgroup .
+.It Xo
+.Nm
+.Cm projectspace
+.Op Fl Hp
+.Oo Fl o Ar field Ns Oo , Ns Ar field Oc Ns ... Oc
+.Oo Fl s Ar field Oc Ns ...
+.Oo Fl S Ar field Oc Ns ...
+.Ar filesystem Ns | Ns Ar snapshot
+.Xc
+Displays space consumed by, and quotas on, each project in the specified
+filesystem or snapshot.
+This subcommand is identical to
+.Nm zfs Cm userspace ,
+except that the project identifier is numeral, not name.
+So need neither the option
+.Sy -i
+for SID to POSIX ID nor
+.Sy -n
+for numeric ID, nor
+.Sy -t
+for types.
+.It Xo
+.Nm
+.Cm project
+.Oo Fl d Ns | Ns Fl r Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Xc
+List project identifier (ID) and inherit flag of files or directories.
+.Bl -tag -width "-d"
+.It Fl d
+Show the directory project ID and inherit flag, not its children.
+It will overwrite the former specified
+.Fl r
+option.
+.It Fl r
+Show on subdirectories recursively.
+It will overwrite the former specified
+.Fl d
+option.
+.El
+.It Xo
+.Nm
+.Cm project
+.Fl C
+.Oo Fl kr Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Xc
+Clear project inherit flag and/or ID on the files or directories.
+.Bl -tag -width "-k"
+.It Fl k
+Keep the project ID unchanged.
+If not specified, the project ID will be reset as zero.
+.It Fl r
+Clear on subdirectories recursively.
+.El
+.It Xo
+.Nm
+.Cm project
+.Fl c
+.Oo Fl 0 Ns Oc
+.Oo Fl d Ns | Ns Fl r Ns Oc
+.Op Fl p Ar id
+.Ar file Ns | Ns Ar directory Ns ...
+.Xc
+Check project ID and inherit flag on the files or directories, report the
+entries without project inherit flag or with different project IDs from the
+specified (via
+.Fl p
+option) value or the target directory's project ID.
+.Bl -tag -width "-0"
+.It Fl 0
+Print file name with a trailing NUL instead of newline (by default), like
+"find -print0".
+.It Fl d
+Check the directory project ID and inherit flag, not its children.
+It will overwrite the former specified
+.Fl r
+option.
+.It Fl p
+Specify the referenced ID for comparing with the target files or directories'
+project IDs.
+If not specified, the target (top) directory's project ID will be used as the
+referenced one.
+.It Fl r
+Check on subdirectories recursively.
+It will overwrite the former specified
+.Fl d
+option.
+.El
+.It Xo
+.Nm
+.Cm project
+.Op Fl p Ar id
+.Oo Fl rs Ns Oc
+.Ar file Ns | Ns Ar directory Ns ...
+.Xc
+Set project ID and/or inherit flag on the files or directories.
+.Bl -tag -width "-p"
+.It Fl p
+Set the files' or directories' project ID with the given value.
+.It Fl r
+Set on subdirectories recursively.
+.It Fl s
+Set project inherit flag on the given files or directories.
+It is usually used for setup tree quota on the directory target with
+.Fl r
+option specified together.
+When setup tree quota, by default the directory's project ID will be set to
+all its descendants unless you specify the project ID via
+.Fl p
+option explicitly.
+.El
 .It Xo
 .Nm
 .Cm mount
@@ -3026,7 +3291,7 @@ feature.
 .It Xo
 .Nm
 .Cm send
-.Op Fl DLPRcenpvw
+.Op Fl DLPRbcehnpvw
 .Op Oo Fl I Ns | Ns Fl i Oc Ar snapshot
 .Ar snapshot
 .Xc
@@ -3128,6 +3393,14 @@ See
 for details on ZFS feature flags and the
 .Sy embedded_data
 feature.
+.It Fl b, -backup
+Sends only received property values whether or not they are overridden by local
+settings, but only if the dataset has ever been received.
+Use this option when you want
+.Nm zfs Cm receive
+to restore received properties backed up on the sent dataset and to avoid
+sending local settings that may have nothing to do with the source dataset,
+but only with how the data is backed up.
 .It Fl c , -compressed
 Generate a more compact stream by using compressed WRITE records for blocks
 which are compressed on disk and in memory
@@ -3147,6 +3420,12 @@ option is not supplied in conjunction with
 .Fl c ,
 then the data will be decompressed before sending so it can be split into
 smaller block sizes.
+.It Fl h, -holds
+Generate a stream package that includes any snapshot holds (created with the
+.Sy zfs hold
+command), and indicating to
+.Sy zfs receive
+that the holds be applied to the dataset on the receiving system.
 .It Fl i Ar snapshot
 Generate an incremental stream from the first
 .Ar snapshot
@@ -3345,16 +3624,20 @@ for more details.
 .It Xo
 .Nm
 .Cm receive
-.Op Fl Fnsuv
+.Op Fl Fhnsuv
 .Op Fl o Sy origin Ns = Ns Ar snapshot
+.Op Fl o Ar property Ns = Ns Ar value
+.Op Fl x Ar property
 .Ar filesystem Ns | Ns Ar volume Ns | Ns Ar snapshot
 .Xc
 .It Xo
 .Nm
 .Cm receive
-.Op Fl Fnsuv
+.Op Fl Fhnsuv
 .Op Fl d Ns | Ns Fl e
 .Op Fl o Sy origin Ns = Ns Ar snapshot
+.Op Fl o Ar property Ns = Ns Ar value
+.Op Fl x Ar property
 .Ar filesystem
 .Xc
 Creates a snapshot whose contents are as specified in the stream provided on
@@ -3384,6 +3667,31 @@ command is received, any snapshots that do not exist on the sending location are
 destroyed by using the
 .Nm zfs Cm destroy Fl d
 command.
+.Pp
+If
+.Fl o Em property Ns = Ns Ar value
+or
+.Fl x Em property
+is specified, it applies to the effective value of the property throughout
+the entire subtree of replicated datasets.
+Effective property values will be
+set (
+.Fl o
+) or inherited (
+.Fl x
+) on the topmost in the replicated subtree.
+In descendant datasets, if the property is set by the send stream, it will be
+overridden by forcing the property to be inherited from the top‐most file
+system.
+Received properties are retained in spite of being overridden and may be
+restored with
+.Nm zfs Cm inherit Fl S .
+Specifying
+.Fl o Sy origin Ns = Ns Em snapshot
+is a special case because, even if
+.Sy origin
+is a read-only property and cannot be set, it's allowed to receive the send
+stream as a clone of the given snapshot.
 .Pp
 Raw encrypted send streams (created with
 .Nm zfs Cm send Fl w
@@ -3433,7 +3741,6 @@ When an incremental raw receive is performed on top of an existing snapshot,
 ZFS will check to confirm that the "from" snapshot on both the source and
 destination were using the same IV set, ensuring the new IV set is consistent.
 .Pp
-ds
 The name of the snapshot
 .Pq and file system, if a full stream is received
 that this subcommand creates depends on the argument type and the use of the
@@ -3494,6 +3801,9 @@ snapshot as described in the paragraph above.
 Discard all but the last element of the sent snapshot's file system name, using
 that element to determine the name of the target file system for the new
 snapshot as described in the paragraph above.
+.It Fl h
+Skip the receive of holds.
+There is no effect if holds are not sent.
 .It Fl n
 Do not actually receive the stream.
 This can be useful in conjunction with the
@@ -3507,11 +3817,68 @@ Which snapshot was specified will not affect the success or failure of the
 receive, as long as the snapshot does exist.
 If the stream is an incremental send stream, all the normal verification will be
 performed.
-.It Fl u
-File system that is associated with the received stream is not mounted.
-.It Fl v
-Print verbose information about the stream and the time required to perform the
-receive operation.
+.It Fl o Em property Ns = Ns Ar value
+Sets the specified property as if the command
+.Nm zfs Cm set Em property Ns = Ns Ar value
+was invoked immediately before the receive.
+When receiving a stream from
+.Nm zfs Cm send Fl R ,
+causes the property to be inherited by all descendant datasets, as though
+.Nm zfs Cm inherit Em property
+was run on any descendant datasets that have this property set on the
+sending system.
+.Pp
+Any editable property can be set at receive time.
+Set-once properties bound to the received data, such as
+.Sy normalization
+and
+.Sy casesensitivity ,
+cannot be set at receive time even when the datasets are newly created by
+.Nm zfs Cm receive .
+Additionally both settable properties
+.Sy version
+and
+.Sy volsize
+cannot be set at receive time.
+.Pp
+The
+.Fl o
+option may be specified multiple times, for different properties.
+An error results if the same property is specified in multiple
+.Fl o
+or
+.Fl x
+options.
+.Pp
+The
+.Fl o
+option may also be used to override encryption properties upon initial
+receive.
+This allows unencrypted streams to be received as encrypted datasets.
+To cause the received dataset (or root dataset of a recursive stream) to be
+received as an encryption root, specify encryption properties in the same
+manner as is required for
+.Nm
+.Cm create .
+For instance:
+.Bd -literal
+# zfs send tank/test@snap1 | zfs recv -o encryption=on -o keyformat=passphrase -o keylocation=file:///path/to/keyfile
+.Ed
+.Pp
+Note that
+.Op Fl o Ar keylocation Ns = Ns Ar prompt
+may not be specified here, since stdin is already being utilized for the send
+stream.
+Once the receive has completed, you can use
+.Nm
+.Cm set
+to change this setting after the fact.
+Similarly, you can receive a dataset as an encrypted child by specifying
+.Op Fl x Ar encryption
+to force the property to be inherited.
+Overriding encryption properties (except for
+.Sy keylocation )
+is not possible with raw send streams.
 .It Fl s
 If the receive is interrupted, save the partially received state, rather
 than deleting it.
@@ -3537,6 +3904,30 @@ feature enabled.
 See
 .Xr zpool-features 5
 for details on ZFS feature flags.
+.It Fl u
+File system that is associated with the received stream is not mounted.
+.It Fl v
+Print verbose information about the stream and the time required to perform the
+receive operation.
+.It Fl x Em property
+Ensures that the effective value of the specified property after the
+receive is unaffected by the value of that property in the send stream (if any),
+as if the property had been excluded from the send stream.
+.Pp
+If the specified property is not present in the send stream, this option does
+nothing.
+.Pp
+If a received property needs to be overridden, the effective value will be
+set or inherited, depending on whether the property is inheritable or not.
+.Pp
+In the case of an incremental update,
+.Fl x
+leaves any existing local setting or explicit inheritance unchanged.
+.Pp
+All
+.Fl o
+restrictions (e.g. set-once) apply equally to
+.Fl x .
 .El
 .It Xo
 .Nm
@@ -3669,6 +4060,11 @@ userprop         other          Allows changing any user property
 userquota        other          Allows accessing any userquota@...
                                 property
 userused         other          Allows reading any userused@... property
+projectobjquota  other          Allows accessing any projectobjquota@...
+                                property
+projectquota     other          Allows accessing any projectquota@... property
+projectobjused   other          Allows reading any projectobjused@... property
+projectused      other          Allows reading any projectused@... property
 
 aclinherit       property
 aclmode          property

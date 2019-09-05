@@ -13,26 +13,25 @@
 
 #
 # The src/ sub-directory is un-modified copy of
-# https://github.com/illumos/smatch/tree/0.5.1-il-3
+# https://github.com/illumos/smatch/tree/0.5.1-il-5
 #
 # This Makefile installs just enough for us to be able to run smatch
 # locally.
 #
 
 PROG = smatch
-SPARSE_VERSION = 0.5.1-il-3
+SPARSE_VERSION = 0.5.1-il-5
 
 include ../Makefile.tools
 
 # We have to build smatch before we can use cw
 i386_CC = $(GNUC_ROOT)/bin/gcc
 sparc_CC = $(GNUC_ROOT)/bin/gcc
+# sparc doesn't recognise -msave-args
+i386_SMATCHFLAGS = -msave-args
+sparc_SMATCHFLAGS =
 
-#
-# Note that we always build smatch 64-bit, assuring that we get the same binary
-# regardless of the image of the build machine.
-#
-CFLAGS = -O -m64 -D__sun -Wall -Wno-unknown-pragmas -std=gnu99 -nodefaultlibs
+CFLAGS = -O -m64 $($(MACH)_SMATCHFLAGS) -D__sun -Wall -Wno-unknown-pragmas -std=gnu99 -nodefaultlibs
 
 SMATCHDATADIR = $(ROOTONBLDSHARE)/smatch
 
@@ -90,7 +89,7 @@ OBJS += smatch_flow.o smatch_conditions.o smatch_slist.o smatch_states.o \
 	smatch_mtag_map.o smatch_mtag_data.o \
 	smatch_param_to_mtag_data.o smatch_mem_tracker.o smatch_array_values.o \
 	smatch_nul_terminator.o smatch_assigned_expr.o smatch_kernel_user_data.o \
-	smatch_statement_count.o
+	smatch_statement_count.o smatch_bits.o smatch_integer_overflow.o
 
 OBJS += target.o parse.o tokenize.o pre-process.o symbol.o lib.o scope.o \
 	expression.o show-parse.o evaluate.o expand.o inline.o linearize.o \
@@ -102,9 +101,7 @@ OBJS += target.o parse.o tokenize.o pre-process.o symbol.o lib.o scope.o \
 	macro_table.o token_store.o hashtable.o
 
 SMATCH_DATA = \
-	illumos_kernel.no_return_funcs \
 	illumos_kernel.skipped_functions \
-	illumos_user.no_return_funcs \
 	illumos_user.skipped_functions
 
 SMATCH_DB_DATA = \

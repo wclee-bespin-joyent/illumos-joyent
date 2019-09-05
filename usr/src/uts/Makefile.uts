@@ -22,11 +22,10 @@
 #
 # Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2011 Bayard G. Bell. All rights reserved.
-# Copyright (c) 2011 by Delphix. All rights reserved.
+# Copyright (c) 2011,2017 by Delphix. All rights reserved.
 # Copyright (c) 2013 Andrew Stormont.  All rights reserved.
-# Copyright 2018 Joyent, Inc.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
-# Copyright (c) 2019, Joyent, Inc.
+# Copyright 2019 Joyent, Inc.
 #
 
 #
@@ -223,6 +222,11 @@ CERRWARN += -_gcc=-Wno-unknown-pragmas
 CERRWARN += -_gcc=-Wno-unused-parameter
 CERRWARN += -_gcc=-Wno-missing-field-initializers
 
+# gcc4 lacks -Wno-maybe-uninitialized
+CNOWARN_UNINIT = -_gcc4=-Wno-uninitialized \
+    -_gcc7=-Wno-maybe-uninitialized \
+    -_gcc8=-Wno-maybe-uninitialized
+
 # DEBUG v. -nd make for frequent unused variables, empty conditions, etc. in
 # -nd builds
 $(RELEASE_BUILD)CERRWARN += -_gcc=-Wno-unused
@@ -236,6 +240,23 @@ include $(SRC)/Makefile.smatch
 # so we have to disable all these smatch checks.
 #
 SMOFF += sizeof
+
+#
+# Add specific compiler options that are required based on the
+# architecture in question.
+#
+CFLAGS_uts_i386 += -_gcc7=-mindirect-branch=thunk-extern
+CFLAGS_uts_i386 += -_gcc7=-mindirect-branch-register
+CFLAGS_uts_i386 += -_gcc8=-mindirect-branch=thunk-extern
+CFLAGS_uts_i386 += -_gcc8=-mindirect-branch-register
+
+#
+# Ensure that the standard function prologue remains at the very start of a function,
+# so DTrace fbt will instrument the right place.
+#
+CFLAGS_uts_i386 += -_gcc7=-fno-shrink-wrap
+CFLAGS_uts_i386 += -_gcc8=-fno-shrink-wrap
+CFLAGS_uts_i386 += -_gcc9=-fno-shrink-wrap
 
 CSTD = $(CSTD_GNU99)
 
@@ -253,6 +274,7 @@ CFLAGS_uts		+= $(CGLOBALSTATIC)
 CFLAGS_uts		+= $(EXTRA_CFLAGS)
 CFLAGS_uts		+= $(CSOURCEDEBUGFLAGS)
 CFLAGS_uts		+= $(CUSERFLAGS)
+CFLAGS_uts		+= $(CFLAGS_uts_$(MACH))
 
 #
 #	Declare that $(OBJECTS) and $(LINTS) can be compiled in parallel.
@@ -426,6 +448,7 @@ ROOT_FONT_DIR_32	= $(ROOT_MOD_DIR)/fonts
 ROOT_DACF_DIR_32	= $(ROOT_MOD_DIR)/dacf
 ROOT_CRYPTO_DIR_32	= $(ROOT_MOD_DIR)/crypto
 ROOT_MAC_DIR_32		= $(ROOT_MOD_DIR)/mac
+ROOT_CC_DIR_32		= $(ROOT_MOD_DIR)/cc
 ROOT_OVERLAY_DIR_32	= $(ROOT_MOD_DIR)/overlay
 ROOT_KICONV_DIR_32	= $(ROOT_MOD_DIR)/kiconv
 
@@ -454,6 +477,7 @@ ROOT_FONT_DIR_64	= $(ROOT_MOD_DIR)/fonts/$(SUBDIR64)
 ROOT_DACF_DIR_64	= $(ROOT_MOD_DIR)/dacf/$(SUBDIR64)
 ROOT_CRYPTO_DIR_64	= $(ROOT_MOD_DIR)/crypto/$(SUBDIR64)
 ROOT_MAC_DIR_64		= $(ROOT_MOD_DIR)/mac/$(SUBDIR64)
+ROOT_CC_DIR_64		= $(ROOT_MOD_DIR)/cc/$(SUBDIR64)
 ROOT_OVERLAY_DIR_64	= $(ROOT_MOD_DIR)/overlay/$(SUBDIR64)
 ROOT_KICONV_DIR_64	= $(ROOT_MOD_DIR)/kiconv/$(SUBDIR64)
 
@@ -482,6 +506,7 @@ ROOT_FONT_DIR		= $(ROOT_FONT_DIR_$(CLASS))
 ROOT_DACF_DIR		= $(ROOT_DACF_DIR_$(CLASS))
 ROOT_CRYPTO_DIR		= $(ROOT_CRYPTO_DIR_$(CLASS))
 ROOT_MAC_DIR		= $(ROOT_MAC_DIR_$(CLASS))
+ROOT_CC_DIR		= $(ROOT_CC_DIR_$(CLASS))
 ROOT_OVERLAY_DIR	= $(ROOT_OVERLAY_DIR_$(CLASS))
 ROOT_KICONV_DIR		= $(ROOT_KICONV_DIR_$(CLASS))
 ROOT_FIRMWARE_DIR	= $(ROOT_MOD_DIR)/firmware
@@ -501,6 +526,7 @@ ROOT_MOD_DIRS_32        += $(ROOT_EMLXS_FW_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_CPU_DIR_32) $(ROOT_FONT_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_TOD_DIR_32) $(ROOT_DACF_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_CRYPTO_DIR_32) $(ROOT_MAC_DIR_32)
+ROOT_MOD_DIRS_32	+= $(ROOT_CC_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_OVERLAY_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_KICONV_DIR_32)
 ROOT_MOD_DIRS_32	+= $(ROOT_FIRMWARE_DIR)
@@ -595,7 +621,7 @@ PARALLEL_KMODS = $(DRV_KMODS) $(EXEC_KMODS) $(FS_KMODS) $(SCHED_KMODS) \
 		 $(MMU_KMODS) $(DACF_KMODS) $(EXPORT_KMODS) $(IPP_KMODS) \
 		 $(CRYPTO_KMODS) $(PCBE_KMODS) \
 		 $(DRV_KMODS_$(CLASS)) $(MISC_KMODS_$(CLASS)) $(MAC_KMODS) \
-		 $(BRAND_KMODS) $(KICONV_KMODS) $(OVERLAY_KMODS) \
+		 $(BRAND_KMODS) $(KICONV_KMODS) $(OVERLAY_KMODS) $(CC_KMODS) \
 		 $(SOCKET_KMODS)
 
 KMODS = $(GENUNIX_KMODS) $(PARALLEL_KMODS)
@@ -607,7 +633,7 @@ LINT_KMODS = $(DRV_KMODS) $(EXEC_KMODS) $(FS_KMODS) $(SCHED_KMODS) \
 	  $(MACH_KMODS) $(GSS_KMODS) $(DACF_KMODS) $(IPP_KMODS) \
 	  $(CRYPTO_KMODS) $(PCBE_KMODS) \
 	  $(DRV_KMODS_$(CLASS)) $(MISC_KMODS_$(CLASS)) $(MAC_KMODS) \
-	  $(BRAND_KMODS) $(KICONV_KMODS) $(SOCKET_KMODS)
+	  $(BRAND_KMODS) $(KICONV_KMODS) $(CC_KMODS) $(SOCKET_KMODS)
 
 #
 #	Files to be compiled with -xa, to generate basic block execution

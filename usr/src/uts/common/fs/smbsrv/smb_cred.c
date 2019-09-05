@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  */
 
 /*
@@ -49,6 +49,11 @@ static ksidlist_t *smb_cred_set_sidlist(smb_ids_t *token_grps);
  * If the mapped UID is ephemeral, or the primary group could not be
  * obtained, the cred gid is set to whatever Solaris group is mapped
  * to the token's primary group.
+ *
+ * Also add any privileges that should always be in effect for this user.
+ * Note that an SMB user object also gets a u_privcred which is used
+ * when the client opens an object with "backup/restore intent".
+ * That cred is setup later, in smb_user_setcred().
  */
 cred_t *
 smb_cred_create(smb_token_t *token)
@@ -109,6 +114,18 @@ smb_cred_create(smb_token_t *token)
 		    NULL);
 	}
 
+	/*
+	 * See smb.4 bypass_traverse_checking
+	 *
+	 * For historical reasons, the Windows privilege is named
+	 * SeChangeNotifyPrivilege, though the description is
+	 * "Bypass traverse checking".
+	 */
+	if (smb_token_query_privilege(token, SE_CHANGE_NOTIFY_LUID)) {
+		(void) crsetpriv(cr, PRIV_FILE_DAC_SEARCH, NULL);
+	}
+
+
 	return (cr);
 }
 
@@ -154,4 +171,20 @@ smb_cred_set_sidlist(smb_ids_t *token_grps)
 	}
 
 	return (lp);
+}
+
+/*
+ * Special variant of smb_cred_create() used when we need an
+ * SMB kcred (e.g. DH import).  The returned cred must be
+ * from crget() so it can be passed to smb_user_setcred().
+ */
+cred_t *
+smb_kcred_create(void)
+{
+	cred_t	*cr;
+
+	cr = crget();
+	ASSERT(cr != NULL);
+
+	return (cr);
 }

@@ -417,10 +417,9 @@ mount_root(char *arg)
 	struct i386_devdesc *ddesc;
 	uint8_t part;
 
-	root = malloc(strlen(arg) + 2);
-	if (root == NULL)
+	if (asprintf(&root, "%s:", arg) < 0)
 		return (1);
-	sprintf(root, "%s:", arg);
+
 	if (i386_getdev((void **)&ddesc, root, NULL)) {
 		free(root);
 		return (1);
@@ -439,6 +438,7 @@ mount_root(char *arg)
 		    bdev->dd.d_unit, part);
 		bootinfo.bi_bios_dev = bd_unit2bios(bdev);
 	}
+	strncpy(boot_devname, root, sizeof (boot_devname));
 	setenv("currdev", root, 1);
 	free(root);
 	return (0);
@@ -471,18 +471,22 @@ parse_cmd(void)
 	char *ep, *p, *q;
 	const char *cp;
 	char line[80];
-	int c, i, j;
+	int c, i;
 
 	while ((c = *arg++)) {
-		if (c == ' ' || c == '\t' || c == '\n')
+		if (isspace(c))
 			continue;
-		for (p = arg; *p && *p != '\n' && *p != ' ' && *p != '\t'; p++)
+
+		for (p = arg; *p != '\0' && !isspace(*p); p++)
 			;
 		ep = p;
-		if (*p)
-			*p++ = 0;
+		if (*p != '\0')
+			*p++ = '\0';
 		if (c == '-') {
 			while ((c = *arg++)) {
+				if (isspace(c))
+					break;
+
 				if (c == 'P') {
 					if (*(uint8_t *)PTOV(0x496) & 0x10) {
 						cp = "yes";
@@ -494,14 +498,22 @@ parse_cmd(void)
 					printf("Keyboard: %s\n", cp);
 					continue;
 				} else if (c == 'S') {
-					j = 0;
-					while ((unsigned int)
-					    (i = *arg++ - '0') <= 9)
-						j = j * 10 + i;
-					if (j > 0 && i == -'0') {
-						comspeed = j;
+					char *end;
+
+					errno = 0;
+					i = strtol(arg, &end, 10);
+					if (errno == 0 &&
+					    *arg != '\0' &&
+					    *end == '\0' &&
+					    i > 0 &&
+					    i <= 115200) {
+						comspeed = i;
 						break;
+					} else {
+						printf("warning: bad value for "
+						    "speed: %s\n", arg);
 					}
+					arg = end;
 					/*
 					 * Fall through to error below
 					 * ('S' not in optstr[]).
@@ -557,10 +569,11 @@ parse_cmd(void)
 			 * If there is a colon, switch pools.
 			 */
 			if (strncmp(arg, "zfs:", 4) == 0)
-				q = strchr(arg + 4, ':');
+				q = strrchr(arg + 4, ':');
 			else
-				q = strchr(arg, ':');
-			if (q) {
+				q = strrchr(arg, ':');
+
+			if (q != NULL) {
 				*q++ = '\0';
 				if (mount_root(arg) != 0)
 					return (-1);

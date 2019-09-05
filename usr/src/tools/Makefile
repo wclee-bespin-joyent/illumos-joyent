@@ -24,18 +24,22 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
-# Copyright (c) 2019, Joyent, Inc.
+# Copyright 2019 Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
 include ../Makefile.master
 
-# Bootstrap problem: 'cw' must be built before anything else can be built.
-# 'install.bin' should be built next, being the 'install' target dependency
-# for everything else.
+# Bootstrap problem: some utilities are pre-requisites for building everything
+# else:
+#    - smatch - as it is a shadow compiler
+#    - cw - as it is used to drive builds
+#    - install.bin - being the 'install' target dependency
+#    - ctf - being used to generate CTF data
 #
-# Because of somewhat cyclic dependency between them, both cw and install.bin
-# override the way we install binaries in their Makefiles.
+# Anything built before 'install.bin' is present must override binary
+# installation rules in their makefiles. This includes the Makefile for
+# 'install.bin' itself.
 BOOT_SUBDIRS= \
 	smatch \
 	.WAIT \
@@ -46,7 +50,6 @@ BOOT_SUBDIRS= \
 	ctf
 
 COMMON_SUBDIRS= \
-	codereview \
 	codesign \
 	cscope-fast \
 	env \
@@ -82,16 +85,6 @@ i386_SUBDIRS=		\
 	elfextract	\
 	mbh_patch	\
 	btxld
-
-LINTSUBDIRS= \
-	codereview \
-	ctf \
-	cw \
-	findunref \
-	lintdump \
-	ndrgen \
-	protocmp \
-	protolist
 
 SUBDIRS= \
 	$($(MACH)_SUBDIRS) \
@@ -135,7 +128,6 @@ all :=		TARGET= install
 install :=	TARGET= install
 clean :=	TARGET= clean
 clobber :=	TARGET= clobber
-lint :=		TARGET= lint
 _msg :=		TARGET= _msg
 
 .KEEP_STATE:
@@ -159,7 +151,7 @@ clean: $(SUBDIRS)
 clobber: $(SUBDIRS)
 	$(RM) -rf $(TOOLS_PROTO)
 
-lint: $(LINTSUBDIRS)
+bootstrap: $(BOOT_SUBDIRS)
 
 _msg: $(MSGSUBDIRS)
 

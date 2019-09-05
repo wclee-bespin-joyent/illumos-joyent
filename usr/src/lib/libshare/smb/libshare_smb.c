@@ -84,7 +84,7 @@ static int hostname_validator(int, char *);
 static int path_validator(int, char *);
 static int cmd_validator(int, char *);
 static int disposition_validator(int, char *);
-static int max_protocol_validator(int, char *);
+static int protocol_validator(int, char *);
 static int require_validator(int, char *);
 
 static int smb_enable_resource(sa_resource_t);
@@ -179,6 +179,7 @@ struct option_defs optdefs[] = {
 	{ SHOPT_GUEST,		OPT_TYPE_BOOLEAN },
 	{ SHOPT_DFSROOT,	OPT_TYPE_BOOLEAN },
 	{ SHOPT_DESCRIPTION,	OPT_TYPE_STRING },
+	{ SHOPT_CA,		OPT_TYPE_BOOLEAN },
 	{ SHOPT_FSO,		OPT_TYPE_BOOLEAN },
 	{ SHOPT_QUOTAS,		OPT_TYPE_BOOLEAN },
 	{ SHOPT_ENCRYPT,	OPT_TYPE_STRING },
@@ -918,9 +919,13 @@ struct smb_proto_option_defs {
 	    SMB_REFRESH_REFRESH },
 	{ SMB_CI_DISPOSITION, 0, MAX_VALUE_BUFLEN,
 	    disposition_validator, SMB_REFRESH_REFRESH },
-	{ SMB_CI_MAX_PROTOCOL, 0, MAX_VALUE_BUFLEN, max_protocol_validator,
+	{ SMB_CI_MAX_PROTOCOL, 0, MAX_VALUE_BUFLEN, protocol_validator,
 	    SMB_REFRESH_REFRESH },
 	{ SMB_CI_ENCRYPT, 0, MAX_VALUE_BUFLEN, require_validator,
+	    SMB_REFRESH_REFRESH },
+	{ SMB_CI_MIN_PROTOCOL, 0, MAX_VALUE_BUFLEN, protocol_validator,
+	    SMB_REFRESH_REFRESH },
+	{ SMB_CI_BYPASS_TRAVERSE_CHECKING, 0, 0, true_false_validator,
 	    SMB_REFRESH_REFRESH },
 	{ SMB_CI_OPLOCK_ENABLE, 0, 0, true_false_validator,
 	    SMB_REFRESH_REFRESH },
@@ -2191,6 +2196,9 @@ smb_build_shareinfo(sa_share_t share, sa_resource_t resource, smb_share_t *si)
 	if (smb_saprop_getbool(opts, SHOPT_DFSROOT, B_FALSE))
 		si->shr_flags |= SMB_SHRF_DFSROOT;
 
+	if (smb_saprop_getbool(opts, SHOPT_CA, B_FALSE))
+		si->shr_flags |= SMB_SHRF_CA;
+
 	if (smb_saprop_getbool(opts, SHOPT_FSO, B_FALSE))
 		si->shr_flags |= SMB_SHRF_FSO;
 
@@ -2389,7 +2397,7 @@ disposition_validator(int index, char *value)
 
 /*ARGSUSED*/
 static int
-max_protocol_validator(int index, char *value)
+protocol_validator(int index, char *value)
 {
 	if (value == NULL)
 		return (SA_BAD_VALUE);
