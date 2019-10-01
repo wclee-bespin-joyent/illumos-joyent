@@ -24,7 +24,7 @@
  */
 
 /*
- * Copyright (c) 2011, 2018 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2019 by Delphix. All rights reserved.
  */
 
 #ifndef _SYS_METASLAB_IMPL_H
@@ -69,7 +69,7 @@ typedef enum trace_alloc_type {
 	TRACE_ENOSPC		= -6ULL,
 	TRACE_CONDENSING	= -7ULL,
 	TRACE_VDEV_ERROR	= -8ULL,
-	TRACE_INITIALIZING	= -9ULL
+	TRACE_DISABLED		= -9ULL,
 } trace_alloc_type_t;
 
 #define	METASLAB_WEIGHT_PRIMARY		(1ULL << 63)
@@ -272,10 +272,10 @@ struct metaslab_group {
 	uint64_t		mg_fragmentation;
 	uint64_t		mg_histogram[RANGE_TREE_HISTOGRAM_SIZE];
 
-	int			mg_ms_initializing;
-	boolean_t		mg_initialize_updating;
-	kmutex_t		mg_ms_initialize_lock;
-	kcondvar_t		mg_ms_initialize_cv;
+	int			mg_ms_disabled;
+	boolean_t		mg_disabled_updating;
+	kmutex_t		mg_ms_disabled_lock;
+	kcondvar_t		mg_ms_disabled_cv;
 
 	kstat_t			*mg_kstat;
 	kmutex_t		mg_kstat_lock;
@@ -366,7 +366,7 @@ struct metaslab {
 	 * write to metaslab data on-disk (i.e flushing entries to
 	 * the metaslab's space map). It helps coordinate readers of
 	 * the metaslab's space map [see spa_vdev_remove_thread()]
-	 * with writers [see metaslab_sync()].
+	 * with writers [see metaslab_sync() or metaslab_flush()].
 	 *
 	 * Note that metaslab_load(), even though a reader, uses
 	 * a completely different mechanism to deal with the reading
@@ -398,11 +398,23 @@ struct metaslab {
 	range_tree_t	*ms_defer[TXG_DEFER_SIZE];
 	range_tree_t	*ms_checkpointing; /* to add to the checkpoint */
 
+	/*
+	 * The ms_trim tree is the set of allocatable segments which are
+	 * eligible for trimming. (When the metaslab is loaded, it's a
+	 * subset of ms_allocatable.)  It's kept in-core as long as the
+	 * autotrim property is set and is not vacated when the metaslab
+	 * is unloaded.  Its purpose is to aggregate freed ranges to
+	 * facilitate efficient trimming.
+	 */
+	range_tree_t	*ms_trim;
+
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;
-	uint64_t	ms_condense_checked_txg;
 
-	uint64_t	ms_initializing; /* leaves initializing this ms */
+	/*
+	 * The number of consumers which have disabled the metaslab.
+	 */
+	uint64_t	ms_disabled;
 
 	/*
 	 * We must always hold the ms_lock when modifying ms_loaded
@@ -410,6 +422,8 @@ struct metaslab {
 	 */
 	boolean_t	ms_loaded;
 	boolean_t	ms_loading;
+	kcondvar_t	ms_flush_cv;
+	boolean_t	ms_flushing;
 
 	/*
 	 * The following histograms count entries that are in the
@@ -495,12 +509,33 @@ struct metaslab {
 	metaslab_group_t *ms_group;	/* metaslab group		*/
 	avl_node_t	ms_group_node;	/* node in metaslab group tree	*/
 	txg_node_t	ms_txg_node;	/* per-txg dirty metaslab links	*/
+	avl_node_t	ms_spa_txg_node; /* node in spa_metaslabs_by_txg */
+
+	/*
+	 * Allocs and frees that are committed to the vdev log spacemap but
+	 * not yet to this metaslab's spacemap.
+	 */
+	range_tree_t	*ms_unflushed_allocs;
+	range_tree_t	*ms_unflushed_frees;
+
+	/*
+	 * We have flushed entries up to but not including this TXG. In
+	 * other words, all changes from this TXG and onward should not
+	 * be in this metaslab's space map and must be read from the
+	 * log space maps.
+	 */
+	uint64_t	ms_unflushed_txg;
 
 	/* updated every time we are done syncing the metaslab's space map */
 	uint64_t	ms_synced_length;
 
 	boolean_t	ms_new;
 };
+
+typedef struct metaslab_unflushed_phys {
+	/* on-disk counterpart of ms_unflushed_txg */
+	uint64_t	msp_unflushed_txg;
+} metaslab_unflushed_phys_t;
 
 #ifdef	__cplusplus
 }

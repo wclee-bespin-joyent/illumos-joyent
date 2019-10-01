@@ -26,6 +26,7 @@
 # Copyright 2015, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2015 Gary Mills
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
+# Copyright 2016 RackTop Systems.
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright 2017 Joyent, Inc.
 # Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
@@ -195,14 +196,16 @@ CTFSTABS=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfstabs
 CTFSTRIP=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfstrip
 NDRGEN=		$(ONBLD_TOOLS)/bin/$(MACH)/ndrgen
 GENOFFSETS=	$(ONBLD_TOOLS)/bin/genoffsets
-GENSETDEFS=	$(ONBLD_TOOLS)/bin/gensetdefs
 XREF=		$(ONBLD_TOOLS)/bin/xref
 FIND=		/usr/bin/find
 PERL=		/usr/bin/perl
 PERL_VERSION=	5.12
 PERL_PKGVERS=	-512
-PERL_ARCH =		i86pc-solaris-64int
-$(SPARC_BLD)PERL_ARCH =	sun4-solaris-64int
+PERL_MACH=	i86pc
+$(SPARC_BLD)PERL_MACH=	sun4
+PERL_VARIANT=
+PERL_ARCH=	$(PERL_MACH)-solaris$(PERL_VARIANT)-64int
+PERL_ARCH64=	$(PERL_MACH)-solaris$(PERL_VARIANT)-64
 PYTHON_VERSION=	2.7
 PYTHON_PKGVERS=	-27
 PYTHON_SUFFIX=
@@ -810,13 +813,18 @@ CCEXTNEEDED		= -lCrun -lCstd
 $(__GNUC)CCNEEDED	= -L$(GCCLIBDIR) -lstdc++ -lgcc_s
 $(__GNUC)CCEXTNEEDED	= $(CCNEEDED)
 
+CCNEEDED64		= -lCrun
+CCEXTNEEDED64		= -lCrun -lCstd
+$(__GNUC64)CCNEEDED64	= -L$(GCCLIBDIR) -lstdc++ -lgcc_s
+$(__GNUC64)CCEXTNEEDED	= $(CCNEEDED64)
+
 LINK.c=		$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
 LINK64.c=	$(CC) $(CFLAGS64) $(CPPFLAGS) $(LDFLAGS)
 NORUNPATH=	-norunpath -nolib
 LINK.cc=	$(CCC) $(CCFLAGS) $(CPPFLAGS) $(NORUNPATH) \
 		$(LDFLAGS) $(CCNEEDED)
 LINK64.cc=	$(CCC) $(CCFLAGS64) $(CPPFLAGS) $(NORUNPATH) \
-		$(LDFLAGS) $(CCNEEDED)
+		$(LDFLAGS) $(CCNEEDED64)
 
 #
 # lint macros
@@ -859,6 +867,7 @@ LINT.s=		$(LINT.c)
 #
 # For now at least, we cross-compile amd64 on i386 machines.
 NATIVE_MACH=	$(MACH:amd64=i386)
+NATIVE_MACH64=	$(MACH64)
 
 # Define native compilation macros
 #
@@ -878,6 +887,7 @@ $(__SUNC)PRIMARY_CCC=	studio12,$(SPRO_VROOT)/bin/CC,sun
 CW_CC_COMPILERS=	$(PRIMARY_CC:%=--primary %) $(SHADOW_CCS:%=--shadow %)
 CW_CCC_COMPILERS=	$(PRIMARY_CCC:%=--primary %) $(SHADOW_CCCS:%=--shadow %)
 
+CW_LINKER=		--linker $(LD)
 
 # Till SS12u1 formally becomes the NV CBE, LINT is hard
 # coded to be picked up from the $SPRO_ROOT/sunstudio12.1/
@@ -891,10 +901,10 @@ CW_CCC_COMPILERS=	$(PRIMARY_CCC:%=--primary %) $(SHADOW_CCCS:%=--shadow %)
 #
 CW=			$(ONBLD_TOOLS)/bin/$(MACH)/cw
 
-BUILD_CC=		$(CW) $(CW_CC_COMPILERS) --
-BUILD_CCC=		$(CW) -C $(CW_CCC_COMPILERS) --
+BUILD_CC=		$(CW) $(CW_LINKER) $(CW_CC_COMPILERS) --
+BUILD_CCC=		$(CW) -C $(CW_LINKER) $(CW_CCC_COMPILERS) --
 BUILD_CPP=		/usr/ccs/lib/cpp
-BUILD_LD=		/usr/ccs/bin/ld
+BUILD_LD=		$(ONBLD_TOOLS)/bin/$(MACH)/ld
 BUILD_LINT=		$(SPRO_ROOT)/sunstudio12.1/bin/lint
 
 $(MACH)_CC=		$(BUILD_CC)
@@ -922,6 +932,13 @@ NATIVEAS=		$($(NATIVE_MACH)_AS)
 NATIVELD=		$($(NATIVE_MACH)_LD)
 NATIVELINT=		$($(NATIVE_MACH)_LINT)
 
+NATIVECC64=		$($(NATIVE_MACH64)_CC)
+NATIVECCC64=		$($(NATIVE_MACH64)_CCC)
+NATIVECPP64=		$($(NATIVE_MACH64)_CPP)
+NATIVEAS64=		$($(NATIVE_MACH64)_AS)
+NATIVELD64=		$($(NATIVE_MACH64)_LD)
+NATIVELINT64=		$($(NATIVE_MACH64)_LINT)
+
 #
 # Makefile.master.64 overrides these settings
 #
@@ -931,6 +948,13 @@ CPP=			$(NATIVECPP)
 AS=			$(NATIVEAS)
 LD=			$(NATIVELD)
 LINT=			$(NATIVELINT)
+
+CC64=			$(NATIVECC64)
+CCC64=			$(NATIVECCC64)
+CPP64=			$(NATIVECPP64)
+AS64=			$(NATIVEAS64)
+LD64=			$(NATIVELD64)
+LINT64=			$(NATIVELINT64)
 
 # Pass -Y flag to cpp (method of which is release-dependent)
 CCYFLAG=		-Y I,
@@ -1007,15 +1031,6 @@ CTFCVTFLAGS=		-L VERSION
 # stripping.
 #
 CTFMRGFLAGS=
-
-#
-# Make the transition between old and new CTF Tools. The new ctf tools
-# do not support stabs (eg. Sun Studio). By setting BUILD_OLD_CTF_TOOLS
-# here or in the environment file, the old ones will be built.
-#
-BUILD_NEW_CTF_TOOLS=
-BUILD_OLD_CTF_TOOLS=$(POUND_SIGN)
-$(BUILD_OLD_CTF_TOOLS)BUILD_NEW_CTF_TOOLS= $(POUND_SIGN)
 
 CTFCONVERT_O		= $(CTFCONVERT) $(CTFCVTFLAGS) $@
 

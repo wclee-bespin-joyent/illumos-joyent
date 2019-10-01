@@ -295,9 +295,11 @@ efi_text_cons_clear(struct vis_consclear *ca)
 {
 	EFI_STATUS st;
 	UINTN attr = conout->Mode->Attribute & 0x0F;
+	uint8_t bg;
 
-	attr = EFI_TEXT_ATTR(attr,
-	    solaris_color_to_efi_color[ca->bg_color & 0xF]);
+	bg = solaris_color_to_efi_color[ca->bg_color & 0xF] & 0x7;
+
+	attr = EFI_TEXT_ATTR(attr, bg);
 	st = conout->SetAttribute(conout, attr);
 	if (EFI_ERROR(st))
 		return (1);
@@ -326,6 +328,7 @@ efi_text_cons_display(struct vis_consdisplay *da)
 	UINTN attr;
 	UINTN row, col;
 	tem_char_t *data;
+	uint8_t fg, bg;
 	int i;
 
 	(void) conout->QueryMode(conout, conout->Mode->Mode, &col, &row);
@@ -335,8 +338,10 @@ efi_text_cons_display(struct vis_consdisplay *da)
 		da->width--;
 
 	data = (tem_char_t *)da->data;
-	attr = EFI_TEXT_ATTR(solaris_color_to_efi_color[da->fg_color & 0xf],
-	    solaris_color_to_efi_color[da->bg_color & 0xf]);
+	fg = solaris_color_to_efi_color[da->fg_color & 0xf];
+	bg = solaris_color_to_efi_color[da->bg_color & 0xf] & 0x7;
+	attr = EFI_TEXT_ATTR(fg, bg);
+
 	st = conout->SetAttribute(conout, attr);
 	if (EFI_ERROR(st))
 		return;
@@ -597,27 +602,30 @@ keybuf_inschar(EFI_INPUT_KEY *key)
 {
 
 	switch (key->ScanCode) {
-	case 0x1: /* UP */
+	case SCAN_UP: /* UP */
 		keybuf[0] = 0x1b;	/* esc */
 		keybuf[1] = '[';
 		keybuf[2] = 'A';
 		break;
-	case 0x2: /* DOWN */
+	case SCAN_DOWN: /* DOWN */
 		keybuf[0] = 0x1b;	/* esc */
 		keybuf[1] = '[';
 		keybuf[2] = 'B';
 		break;
-	case 0x3: /* RIGHT */
+	case SCAN_RIGHT: /* RIGHT */
 		keybuf[0] = 0x1b;	/* esc */
 		keybuf[1] = '[';
 		keybuf[2] = 'C';
 		break;
-	case 0x4: /* LEFT */
+	case SCAN_LEFT: /* LEFT */
 		keybuf[0] = 0x1b;	/* esc */
 		keybuf[1] = '[';
 		keybuf[2] = 'D';
 		break;
-	case 0x17:
+	case SCAN_DELETE:
+		keybuf[0] = CHAR_BACKSPACE;
+		break;
+	case SCAN_ESC:
 		keybuf[0] = 0x1b;	/* esc */
 		break;
 	default:

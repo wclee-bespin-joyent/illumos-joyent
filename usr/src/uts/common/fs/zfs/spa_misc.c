@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2018 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2019 by Delphix. All rights reserved.
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright 2013 Saso Kiselkov. All rights reserved.
@@ -42,6 +42,7 @@
 #include <sys/zil.h>
 #include <sys/vdev_impl.h>
 #include <sys/vdev_initialize.h>
+#include <sys/vdev_trim.h>
 #include <sys/metaslab.h>
 #include <sys/uberblock_impl.h>
 #include <sys/txg.h>
@@ -61,7 +62,7 @@
 /*
  * SPA locking
  *
- * There are four basic locks for managing spa_t structures:
+ * There are three basic locks for managing spa_t structures:
  *
  * spa_namespace_lock (global mutex)
  *
@@ -594,6 +595,15 @@ spa_deadman(void *arg)
 		vdev_deadman(spa->spa_root_vdev);
 }
 
+int
+spa_log_sm_sort_by_txg(const void *va, const void *vb)
+{
+	const spa_log_sm_t *a = va;
+	const spa_log_sm_t *b = vb;
+
+	return (AVL_CMP(a->sls_txg, b->sls_txg));
+}
+
 /*
  * Create an uninitialized spa_t with the given name.  Requires
  * spa_namespace_lock.  The caller must ensure that the spa_t doesn't already
@@ -623,6 +633,7 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	mutex_init(&spa->spa_suspend_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_vdev_top_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_iokstat_lock, NULL, MUTEX_DEFAULT, NULL);
+	mutex_init(&spa->spa_flushed_ms_lock, NULL, MUTEX_DEFAULT, NULL);
 
 	cv_init(&spa->spa_async_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&spa->spa_evicting_os_cv, NULL, CV_DEFAULT, NULL);
@@ -683,6 +694,12 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 		avl_create(&spa->spa_alloc_trees[i], zio_bookmark_compare,
 		    sizeof (zio_t), offsetof(zio_t, io_alloc_node));
 	}
+	avl_create(&spa->spa_metaslabs_by_flushed, metaslab_sort_by_flushed,
+	    sizeof (metaslab_t), offsetof(metaslab_t, ms_spa_txg_node));
+	avl_create(&spa->spa_sm_logs_by_txg, spa_log_sm_sort_by_txg,
+	    sizeof (spa_log_sm_t), offsetof(spa_log_sm_t, sls_node));
+	list_create(&spa->spa_log_summary, sizeof (log_summary_entry_t),
+	    offsetof(log_summary_entry_t, lse_node));
 
 	/*
 	 * Every pool starts with the default cachefile
@@ -750,7 +767,7 @@ spa_remove(spa_t *spa)
 	spa_config_dirent_t *dp;
 
 	ASSERT(MUTEX_HELD(&spa_namespace_lock));
-	ASSERT(spa->spa_state == POOL_STATE_UNINITIALIZED);
+	ASSERT(spa_state(spa) == POOL_STATE_UNINITIALIZED);
 	ASSERT3U(zfs_refcount_count(&spa->spa_refcount), ==, 0);
 
 	nvlist_free(spa->spa_config_splitting);
@@ -779,6 +796,9 @@ spa_remove(spa_t *spa)
 	kmem_free(spa->spa_alloc_trees, spa->spa_alloc_count *
 	    sizeof (avl_tree_t));
 
+	avl_destroy(&spa->spa_metaslabs_by_flushed);
+	avl_destroy(&spa->spa_sm_logs_by_txg);
+	list_destroy(&spa->spa_log_summary);
 	list_destroy(&spa->spa_config_list);
 	list_destroy(&spa->spa_leaf_list);
 
@@ -810,6 +830,7 @@ spa_remove(spa_t *spa)
 	cv_destroy(&spa->spa_scrub_io_cv);
 	cv_destroy(&spa->spa_suspend_cv);
 
+	mutex_destroy(&spa->spa_flushed_ms_lock);
 	mutex_destroy(&spa->spa_async_lock);
 	mutex_destroy(&spa->spa_errlist_lock);
 	mutex_destroy(&spa->spa_errlog_lock);
@@ -1175,6 +1196,9 @@ spa_vdev_enter(spa_t *spa)
 {
 	mutex_enter(&spa->spa_vdev_top_lock);
 	mutex_enter(&spa_namespace_lock);
+
+	vdev_autotrim_stop_all(spa);
+
 	return (spa_vdev_config_enter(spa));
 }
 
@@ -1248,9 +1272,19 @@ spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 		ASSERT(!vd->vdev_detached || vd->vdev_dtl_sm == NULL);
 		if (vd->vdev_ops->vdev_op_leaf) {
 			mutex_enter(&vd->vdev_initialize_lock);
-			vdev_initialize_stop(vd, VDEV_INITIALIZE_CANCELED);
+			vdev_initialize_stop(vd, VDEV_INITIALIZE_CANCELED,
+			    NULL);
 			mutex_exit(&vd->vdev_initialize_lock);
+
+			mutex_enter(&vd->vdev_trim_lock);
+			vdev_trim_stop(vd, VDEV_TRIM_CANCELED, NULL);
+			mutex_exit(&vd->vdev_trim_lock);
 		}
+
+		/*
+		 * The vdev may be both a leaf and top-level device.
+		 */
+		vdev_autotrim_stop_wait(vd);
 
 		spa_config_enter(spa, SCL_ALL, spa, RW_WRITER);
 		vdev_free(vd);
@@ -1273,6 +1307,8 @@ spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 int
 spa_vdev_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error)
 {
+	vdev_autotrim_restart(spa);
+
 	spa_vdev_config_exit(spa, vd, txg, error, FTAG);
 	mutex_exit(&spa_namespace_lock);
 	mutex_exit(&spa->spa_vdev_top_lock);
@@ -1953,6 +1989,12 @@ spa_deadman_synctime(spa_t *spa)
 	return (spa->spa_deadman_synctime);
 }
 
+spa_autotrim_t
+spa_get_autotrim(spa_t *spa)
+{
+	return (spa->spa_autotrim);
+}
+
 uint64_t
 dva_get_dsize_sync(spa_t *spa, const dva_t *dva)
 {
@@ -2333,6 +2375,12 @@ uint64_t
 spa_missing_tvds_allowed(spa_t *spa)
 {
 	return (spa->spa_missing_tvds_allowed);
+}
+
+space_map_t *
+spa_syncing_log_sm(spa_t *spa)
+{
+	return (spa->spa_syncing_log_sm);
 }
 
 void
