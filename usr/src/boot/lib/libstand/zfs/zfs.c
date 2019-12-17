@@ -51,12 +51,12 @@
 #define		ZFS_BE_FIRST	4
 #define		ZFS_BE_LAST	8
 
-static int	zfs_open(const char *path, struct open_file *f);
-static int	zfs_close(struct open_file *f);
-static int	zfs_read(struct open_file *f, void *buf, size_t size, size_t *resid);
-static off_t	zfs_seek(struct open_file *f, off_t offset, int where);
-static int	zfs_stat(struct open_file *f, struct stat *sb);
-static int	zfs_readdir(struct open_file *f, struct dirent *d);
+static int	zfs_open(const char *, struct open_file *);
+static int	zfs_close(struct open_file *);
+static int	zfs_read(struct open_file *, void *, size_t, size_t *);
+static off_t	zfs_seek(struct open_file *, off_t, int);
+static int	zfs_stat(struct open_file *, struct stat *);
+static int	zfs_readdir(struct open_file *, struct dirent *);
 
 struct devsw zfs_dev;
 
@@ -82,12 +82,8 @@ struct file {
 	zap_leaf_phys_t	*f_zap_leaf;	/* zap leaf buffer */
 };
 
-#ifdef __FreeBSD__
-static int	zfs_env_index;
-static int	zfs_env_count;
-#endif
-
-SLIST_HEAD(zfs_be_list, zfs_be_entry) zfs_be_head = SLIST_HEAD_INITIALIZER(zfs_be_head);
+SLIST_HEAD(zfs_be_list, zfs_be_entry) zfs_be_head =
+    SLIST_HEAD_INITIALIZER(zfs_be_head);
 struct zfs_be_list *zfs_be_headp;
 struct zfs_be_entry {
 	const char *name;
@@ -108,9 +104,10 @@ zfs_open(const char *upath, struct open_file *f)
 		return (EINVAL);
 
 	/* allocate file system specific data structure */
-	fp = malloc(sizeof(struct file));
-	bzero(fp, sizeof(struct file));
-	f->f_fsdata = (void *)fp;
+	fp = calloc(1, sizeof (struct file));
+	if (fp == NULL)
+		return (ENOMEM);
+	f->f_fsdata = fp;
 
 	rc = zfs_lookup(mount, upath, &fp->f_dnode);
 	fp->f_seekp = 0;
@@ -127,9 +124,7 @@ zfs_close(struct open_file *f)
 	struct file *fp = (struct file *)f->f_fsdata;
 
 	dnode_cache_obj = 0;
-	f->f_fsdata = (void *)0;
-	if (fp == (struct file *)0)
-		return (0);
+	f->f_fsdata = NULL;
 
 	free(fp);
 	return (0);
@@ -140,7 +135,7 @@ zfs_close(struct open_file *f)
  * Cross block boundaries when necessary.
  */
 static int
-zfs_read(struct open_file *f, void *start, size_t size, size_t *resid	/* out */)
+zfs_read(struct open_file *f, void *start, size_t size, size_t *resid)
 {
 	const spa_t *spa = ((struct zfsmount *)f->f_devdata)->spa;
 	struct file *fp = (struct file *)f->f_fsdata;
@@ -159,11 +154,6 @@ zfs_read(struct open_file *f, void *start, size_t size, size_t *resid	/* out */)
 	if (rc)
 		return (rc);
 
-	if (0) {
-	    int i;
-	    for (i = 0; i < n; i++)
-		putchar(((char*) start)[i]);
-	}
 	fp->f_seekp += n;
 	if (resid)
 		*resid = size - n;
@@ -175,6 +165,9 @@ static off_t
 zfs_seek(struct open_file *f, off_t offset, int where)
 {
 	struct file *fp = (struct file *)f->f_fsdata;
+	struct stat sb;
+	int error;
+
 
 	switch (where) {
 	case SEEK_SET:
@@ -184,10 +177,6 @@ zfs_seek(struct open_file *f, off_t offset, int where)
 		fp->f_seekp += offset;
 		break;
 	case SEEK_END:
-	    {
-		struct stat sb;
-		int error;
-
 		error = zfs_stat(f, &sb);
 		if (error != 0) {
 			errno = error;
@@ -195,7 +184,6 @@ zfs_seek(struct open_file *f, off_t offset, int where)
 		}
 		fp->f_seekp = sb.st_size - offset;
 		break;
-	    }
 	default:
 		errno = EINVAL;
 		return (-1);
@@ -232,8 +220,8 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 	 * If this is the first read, get the zap type.
 	 */
 	if (fp->f_seekp == 0) {
-		rc = dnode_read(spa, &fp->f_dnode,
-				0, &fp->f_zap_type, sizeof(fp->f_zap_type));
+		rc = dnode_read(spa, &fp->f_dnode, 0, &fp->f_zap_type,
+		    sizeof (fp->f_zap_type));
 		if (rc)
 			return (rc);
 
@@ -241,18 +229,17 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 			fp->f_seekp = offsetof(mzap_phys_t, mz_chunk);
 		} else {
 			rc = dnode_read(spa, &fp->f_dnode,
-					offsetof(zap_phys_t, zap_num_leafs),
-					&fp->f_num_leafs,
-					sizeof(fp->f_num_leafs));
+			    offsetof(zap_phys_t, zap_num_leafs),
+			    &fp->f_num_leafs, sizeof (fp->f_num_leafs));
 			if (rc)
 				return (rc);
 
 			fp->f_seekp = bsize;
-			fp->f_zap_leaf = (zap_leaf_phys_t *)malloc(bsize);
-			rc = dnode_read(spa, &fp->f_dnode,
-					fp->f_seekp,
-					fp->f_zap_leaf,
-					bsize);
+			fp->f_zap_leaf = malloc(bsize);
+			if (fp->f_zap_leaf == NULL)
+				return (ENOMEM);
+			rc = dnode_read(spa, &fp->f_dnode, fp->f_seekp,
+			    fp->f_zap_leaf, bsize);
 			if (rc)
 				return (rc);
 		}
@@ -263,11 +250,11 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 		if (fp->f_seekp >= bsize)
 			return (ENOENT);
 
-		rc = dnode_read(spa, &fp->f_dnode,
-				fp->f_seekp, &mze, sizeof(mze));
+		rc = dnode_read(spa, &fp->f_dnode, fp->f_seekp, &mze,
+		    sizeof (mze));
 		if (rc)
 			return (rc);
-		fp->f_seekp += sizeof(mze);
+		fp->f_seekp += sizeof (mze);
 
 		if (!mze.mze_name[0])
 			goto mzap_next;
@@ -309,10 +296,8 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 			if (fp->f_seekp >= bsize * fp->f_num_leafs)
 				return (ENOENT);
 
-			rc = dnode_read(spa, &fp->f_dnode,
-					fp->f_seekp,
-					fp->f_zap_leaf,
-					bsize);
+			rc = dnode_read(spa, &fp->f_dnode, fp->f_seekp,
+			    fp->f_zap_leaf, bsize);
 			if (rc)
 				return (rc);
 		}
@@ -323,8 +308,8 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 			goto fzap_next;
 
 		namelen = zc->l_entry.le_name_numints;
-		if (namelen > sizeof(d->d_name))
-			namelen = sizeof(d->d_name);
+		if (namelen > sizeof (d->d_name))
+			namelen = sizeof (d->d_name);
 
 		/*
 		 * Paste the name back together.
@@ -341,7 +326,7 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 			namelen -= len;
 			nc = &ZAP_LEAF_CHUNK(&zl, nc->l_array.la_next);
 		}
-		d->d_name[sizeof(d->d_name) - 1] = 0;
+		d->d_name[sizeof (d->d_name) - 1] = 0;
 
 		/*
 		 * Assume the first eight bytes of the value are
@@ -362,57 +347,107 @@ vdev_read(vdev_t *vdev __unused, void *priv, off_t offset, void *buf,
     size_t bytes)
 {
 	int fd, ret;
-	size_t res, size, remainder, rb_size, blksz;
-	unsigned secsz;
-	off_t off;
-	char *bouncebuf, *rb_buf;
+	size_t res, head, tail, total_size, full_sec_size;
+	unsigned secsz, do_tail_read;
+	off_t start_sec;
+	char *outbuf, *bouncebuf;
 
-	fd = (uintptr_t) priv;
+	fd = (uintptr_t)priv;
+	outbuf = (char *)buf;
 	bouncebuf = NULL;
 
 	ret = ioctl(fd, DIOCGSECTORSIZE, &secsz);
 	if (ret != 0)
 		return (ret);
 
-	off = offset / secsz;
-	remainder = offset % secsz;
-	if (lseek(fd, off * secsz, SEEK_SET) == -1)
-		return (errno);
+	/*
+	 * Handling reads of arbitrary offset and size - multi-sector case
+	 * and single-sector case.
+	 *
+	 *                        Multi-sector Case
+	 *                (do_tail_read = true if tail > 0)
+	 *
+	 *   |<----------------------total_size--------------------->|
+	 *   |                                                       |
+	 *   |<--head-->|<--------------bytes------------>|<--tail-->|
+	 *   |          |                                 |          |
+	 *   |          |       |<~full_sec_size~>|       |          |
+	 *   +------------------+                 +------------------+
+	 *   |          |0101010|     .  .  .     |0101011|          |
+	 *   +------------------+                 +------------------+
+	 *         start_sec                         start_sec + n
+	 *
+	 *
+	 *                      Single-sector Case
+	 *                    (do_tail_read = false)
+	 *
+	 *              |<------total_size = secsz----->|
+	 *              |                               |
+	 *              |<-head->|<---bytes--->|<-tail->|
+	 *              +-------------------------------+
+	 *              |        |0101010101010|        |
+	 *              +-------------------------------+
+	 *                          start_sec
+	 */
+	start_sec = offset / secsz;
+	head = offset % secsz;
+	total_size = roundup2(head + bytes, secsz);
+	tail = total_size - (head + bytes);
+	do_tail_read = ((tail > 0) && (head + bytes > secsz));
+	full_sec_size = total_size;
+	if (head > 0)
+		full_sec_size -= secsz;
+	if (do_tail_read)
+		full_sec_size -= secsz;
 
-	rb_buf = buf;
-	rb_size = bytes;
-	size = roundup2(bytes + remainder, secsz);
-	blksz = size;
-	if (remainder != 0 || size != bytes) {
-		bouncebuf = zfs_alloc(secsz);
+	/* Return of partial sector data requires a bounce buffer. */
+	if ((head > 0) || do_tail_read) {
+		bouncebuf = malloc(secsz);
 		if (bouncebuf == NULL) {
 			printf("vdev_read: out of memory\n");
 			return (ENOMEM);
 		}
-		rb_buf = bouncebuf;
-		blksz = rb_size - remainder;
 	}
 
-	while (bytes > 0) {
-		res = read(fd, rb_buf, rb_size);
-		if (res != rb_size) {
+	if (lseek(fd, start_sec * secsz, SEEK_SET) == -1) {
+		ret = errno;
+		goto error;
+	}
+
+	/* Partial data return from first sector */
+	if (head > 0) {
+		res = read(fd, bouncebuf, secsz);
+		if (res != secsz) {
 			ret = EIO;
 			goto error;
 		}
-		if (bytes < blksz)
-			blksz = bytes;
-		if (bouncebuf != NULL)
-			memcpy(buf, rb_buf + remainder, blksz);
-		buf = (void *)((uintptr_t)buf + blksz);
-		bytes -= blksz;
-		remainder = 0;
-		blksz = rb_size;
+		memcpy(outbuf, bouncebuf + head, min(secsz - head, bytes));
+		outbuf += min(secsz - head, bytes);
+	}
+
+	/* Full data return from read sectors */
+	if (full_sec_size > 0) {
+		res = read(fd, outbuf, full_sec_size);
+		if (res != full_sec_size) {
+			ret = EIO;
+			goto error;
+		}
+		outbuf += full_sec_size;
+	}
+
+	/* Partial data return from last sector */
+	if (do_tail_read) {
+		res = read(fd, bouncebuf, secsz);
+		if (res != secsz) {
+			ret = EIO;
+			goto error;
+		}
+		memcpy(outbuf, bouncebuf, secsz - tail);
 	}
 
 	ret = 0;
 error:
-	if (bouncebuf != NULL)
-		zfs_free(bouncebuf, secsz);
+	free(bouncebuf);
 	return (ret);
 }
 
@@ -448,7 +483,7 @@ struct zfs_probe_args {
 	int		fd;
 	const char	*devname;
 	uint64_t	*pool_guid;
-	u_int		secsz;
+	unsigned	secsz;
 };
 
 static int
@@ -622,8 +657,11 @@ zfs_dev_open(struct open_file *f, ...)
 		spa = spa_find_by_guid(dev->pool_guid);
 	if (!spa)
 		return (ENXIO);
-	mount = malloc(sizeof(*mount));
-	rv = zfs_mount(spa, dev->root_guid, mount);
+	mount = malloc(sizeof (*mount));
+	if (mount == NULL)
+		rv = ENOMEM;
+	else
+		rv = zfs_mount(spa, dev->root_guid, mount);
 	if (rv != 0) {
 		free(mount);
 		return (rv);
@@ -758,7 +796,7 @@ zfs_bootfs(void *zdev)
 	 * the environment and we can stop caring about old kernels,
 	 * we can remove this part.
 	 */
-	snprintf(buf, sizeof(buf), "zfs-bootfs=%s/%" PRIu64, spa->spa_name,
+	snprintf(buf, sizeof (buf), "zfs-bootfs=%s/%" PRIu64, spa->spa_name,
 	    objnum);
 	n = strlen(buf);
 	if (spa->spa_boot_vdev->v_phys_path != NULL) {
@@ -845,191 +883,3 @@ zfs_list(const char *name)
 
 	return (zfs_list_dataset(spa, objid));
 }
-
-#ifdef __FreeBSD__
-void
-init_zfs_bootenv(char *currdev)
-{
-	char *beroot;
-
-	if (strlen(currdev) == 0)
-		return;
-	if(strncmp(currdev, "zfs:", 4) != 0)
-		return;
-	/* Remove the trailing : */
-	currdev[strlen(currdev) - 1] = '\0';
-	setenv("zfs_be_active", currdev, 1);
-	setenv("zfs_be_currpage", "1", 1);
-	/* Forward past zfs: */
-	currdev = strchr(currdev, ':');
-	currdev++;
-	/* Remove the last element (current bootenv) */
-	beroot = strrchr(currdev, '/');
-	if (beroot != NULL)
-		beroot[0] = '\0';
-	beroot = currdev;
-	setenv("zfs_be_root", beroot, 1);
-}
-
-int
-zfs_bootenv(const char *name)
-{
-	static char	poolname[ZFS_MAXNAMELEN], *dsname, *root;
-	char		becount[4];
-	uint64_t	objid;
-	spa_t		*spa;
-	int		len, rv, pages, perpage, currpage;
-
-	if (name == NULL)
-		return (EINVAL);
-	if ((root = getenv("zfs_be_root")) == NULL)
-		return (EINVAL);
-
-	if (strcmp(name, root) != 0) {
-		if (setenv("zfs_be_root", name, 1) != 0)
-			return (ENOMEM);
-	}
-
-	SLIST_INIT(&zfs_be_head);
-	zfs_env_count = 0;
-	len = strlen(name);
-	dsname = strchr(name, '/');
-	if (dsname != NULL) {
-		len = dsname - name;
-		dsname++;
-	} else
-		dsname = "";
-	memcpy(poolname, name, len);
-	poolname[len] = '\0';
-
-	spa = spa_find_by_name(poolname);
-	if (!spa)
-		return (ENXIO);
-	rv = zfs_lookup_dataset(spa, dsname, &objid);
-	if (rv != 0)
-		return (rv);
-	rv = zfs_callback_dataset(spa, objid, zfs_belist_add);
-
-	/* Calculate and store the number of pages of BEs */
-	perpage = (ZFS_BE_LAST - ZFS_BE_FIRST + 1);
-	pages = (zfs_env_count / perpage) + ((zfs_env_count % perpage) > 0 ? 1 : 0);
-	snprintf(becount, 4, "%d", pages);
-	if (setenv("zfs_be_pages", becount, 1) != 0)
-		return (ENOMEM);
-
-	/* Roll over the page counter if it has exceeded the maximum */
-	currpage = strtol(getenv("zfs_be_currpage"), NULL, 10);
-	if (currpage > pages) {
-		if (setenv("zfs_be_currpage", "1", 1) != 0)
-			return (ENOMEM);
-	}
-
-	/* Populate the menu environment variables */
-	zfs_set_env();
-
-	/* Clean up the SLIST of ZFS BEs */
-	while (!SLIST_EMPTY(&zfs_be_head)) {
-		zfs_be = SLIST_FIRST(&zfs_be_head);
-		SLIST_REMOVE_HEAD(&zfs_be_head, entries);
-		free(zfs_be);
-	}
-
-	return (rv);
-}
-
-int
-zfs_belist_add(const char *name, uint64_t value __unused)
-{
-
-	/* Skip special datasets that start with a $ character */
-	if (strncmp(name, "$", 1) == 0) {
-		return (0);
-	}
-	/* Add the boot environment to the head of the SLIST */
-	zfs_be = malloc(sizeof(struct zfs_be_entry));
-	if (zfs_be == NULL) {
-		return (ENOMEM);
-	}
-	zfs_be->name = name;
-	SLIST_INSERT_HEAD(&zfs_be_head, zfs_be, entries);
-	zfs_env_count++;
-
-	return (0);
-}
-
-int
-zfs_set_env(void)
-{
-	char envname[32], envval[256];
-	char *beroot, *pagenum;
-	int rv, page, ctr;
-
-	beroot = getenv("zfs_be_root");
-	if (beroot == NULL) {
-		return (1);
-	}
-
-	pagenum = getenv("zfs_be_currpage");
-	if (pagenum != NULL) {
-		page = strtol(pagenum, NULL, 10);
-	} else {
-		page = 1;
-	}
-
-	ctr = 1;
-	rv = 0;
-	zfs_env_index = ZFS_BE_FIRST;
-	SLIST_FOREACH_SAFE(zfs_be, &zfs_be_head, entries, zfs_be_tmp) {
-		/* Skip to the requested page number */
-		if (ctr <= ((ZFS_BE_LAST - ZFS_BE_FIRST + 1) * (page - 1))) {
-			ctr++;
-			continue;
-		}
-
-		snprintf(envname, sizeof(envname), "bootenvmenu_caption[%d]", zfs_env_index);
-		snprintf(envval, sizeof(envval), "%s", zfs_be->name);
-		rv = setenv(envname, envval, 1);
-		if (rv != 0) {
-			break;
-		}
-
-		snprintf(envname, sizeof(envname), "bootenvansi_caption[%d]", zfs_env_index);
-		rv = setenv(envname, envval, 1);
-		if (rv != 0){
-			break;
-		}
-
-		snprintf(envname, sizeof(envname), "bootenvmenu_command[%d]", zfs_env_index);
-		rv = setenv(envname, "set_bootenv", 1);
-		if (rv != 0){
-			break;
-		}
-
-		snprintf(envname, sizeof(envname), "bootenv_root[%d]", zfs_env_index);
-		snprintf(envval, sizeof(envval), "zfs:%s/%s", beroot, zfs_be->name);
-		rv = setenv(envname, envval, 1);
-		if (rv != 0){
-			break;
-		}
-
-		zfs_env_index++;
-		if (zfs_env_index > ZFS_BE_LAST) {
-			break;
-		}
-
-	}
-
-	for (; zfs_env_index <= ZFS_BE_LAST; zfs_env_index++) {
-		snprintf(envname, sizeof(envname), "bootenvmenu_caption[%d]", zfs_env_index);
-		(void)unsetenv(envname);
-		snprintf(envname, sizeof(envname), "bootenvansi_caption[%d]", zfs_env_index);
-		(void)unsetenv(envname);
-		snprintf(envname, sizeof(envname), "bootenvmenu_command[%d]", zfs_env_index);
-		(void)unsetenv(envname);
-		snprintf(envname, sizeof(envname), "bootenv_root[%d]", zfs_env_index);
-		(void)unsetenv(envname);
-	}
-
-	return (rv);
-}
-#endif

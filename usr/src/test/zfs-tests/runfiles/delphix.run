@@ -144,6 +144,11 @@ tests = ['zfs_destroy_001_pos', 'zfs_destroy_002_pos', 'zfs_destroy_003_pos',
     'zfs_destroy_013_neg', 'zfs_destroy_014_pos', 'zfs_destroy_015_pos',
     'zfs_destroy_016_pos']
 
+[/opt/zfs-tests/tests/functional/cli_root/zfs_diff]
+tests = ['zfs_diff_changes', 'zfs_diff_cliargs', 'zfs_diff_timestamp',
+    'zfs_diff_types', 'zfs_diff_encrypted']
+tags = ['functional', 'cli_root', 'zfs_diff']
+
 [/opt/zfs-tests/tests/functional/cli_root/zfs_get]
 tests = ['zfs_get_001_pos', 'zfs_get_002_pos', 'zfs_get_003_pos',
     'zfs_get_004_pos', 'zfs_get_005_neg', 'zfs_get_006_neg', 'zfs_get_007_neg',
@@ -516,7 +521,7 @@ tests = ['mmp_on_thread', 'mmp_on_uberblocks', 'mmp_on_off', 'mmp_interval',
     'mmp_on_zdb']
 
 [/opt/zfs-tests/tests/functional/mount]
-tests = ['umount_001', 'umountall_001']
+tests = ['umount_001', 'umount_002', 'umountall_001']
 
 [/opt/zfs-tests/tests/functional/mv_files]
 tests = ['mv_files_001_pos', 'mv_files_002_pos']
@@ -641,7 +646,7 @@ tests = ['scrub_mirror_001_pos', 'scrub_mirror_002_pos',
 tests = ['slog_001_pos', 'slog_002_pos', 'slog_003_pos', 'slog_004_pos',
     'slog_005_pos', 'slog_006_pos', 'slog_007_pos', 'slog_008_neg',
     'slog_009_neg', 'slog_010_neg', 'slog_011_neg', 'slog_012_neg',
-    'slog_013_pos', 'slog_014_pos']
+    'slog_013_pos', 'slog_014_pos', 'slog_replay_fs_001', 'slog_replay_fs_002']
 
 [/opt/zfs-tests/tests/functional/snapshot]
 tests = ['clone_001_pos', 'rollback_001_pos', 'rollback_002_pos',
