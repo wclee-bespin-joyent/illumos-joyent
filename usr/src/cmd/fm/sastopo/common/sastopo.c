@@ -44,14 +44,14 @@ usage()
 	    "Print all nodes on the SAS fabric:\n"
 	    "  %s [-d][-V][-R root][FMRI pattern]\n\n"
 	    "Print all the paths between SAS initiators and targets:\n"
-	    "  %s -p [-d][-V][-R root][-l location]\n\n"
+	    "  %s -p [-d][-V][-R root][-l location|logical-disk]\n\n"
 	    "Dump SAS topology snapshot to XML\n"
 	    "  %s -x [-d][-R root]\n\n"
 	    "Read in SAS topology snapshot from XML\n"
 	    "  %s -f <XML file> [-d][-R root]\n\n"
 	    "-C\t\tdump core at exit\n"
 	    "-d\t\tenable debug messages\n"
-	    "-l\t\tfilter results based on FRU location\n"
+	    "-l\t\tfilter results based on FRU location or target CTD\n"
 	    "-h\t\tprint this usage message\n"
 	    "-R\t\toperate against alternate root directory\n"
 	    "-V\t\tverbose mode\n\n", pname, pname, pname, pname);
@@ -390,60 +390,63 @@ err:
 
 /*
  * This function returns B_TRUE if either the initiator or the target node in
- * the specified path has a location value that matches the one passed in.  It
- * returns B_FALSE otherwise.  It also returns B_FALSE if an error is
- * encountered.
+ * the specified path has a location value that matches the one passed in.  For
+ * target nodes, the "location" can either be the FRU location (label) or the
+ * logical disk name (i.e. c#t#d#).  It returns B_FALSE if there is none of the
+ * nodes match or if an error is encountered.
  */
 static boolean_t
 path_matches_location(topo_hdl_t *thp, topo_path_t *path, const char *location)
 {
 	topo_path_component_t *comp;
 	boolean_t ret = B_FALSE;
-	const char *ini_pgname = TOPO_PGROUP_INITIATOR;
-	const char *ini_pname = TOPO_PROP_INITIATOR_LABEL;
-	const char *tgt_pgname = TOPO_PGROUP_TARGET;
-	const char *tgt_pname = TOPO_PROP_TARGET_LABEL;
+	char *pval1, *pval2;
 
 	for (comp = topo_list_next(&path->tsp_components); comp != NULL;
 	    comp = topo_list_next(comp)) {
 
 		topo_vertex_t *vtx = comp->tspc_vertex;
 		tnode_t *tn = topo_vertex_node(vtx);
-		char *name = topo_node_name(tn), *pval;
-		const char *pgname, *pname;
-		int err;
+		char *name = topo_node_name(tn);
+		int err, r;
+
+		pval1 = pval2 = NULL;
 
 		if (strcmp(name, TOPO_VTX_EXPANDER) == 0 ||
 		    strcmp(name, TOPO_VTX_PORT) == 0) {
 			continue;
 		} else if (strcmp(name, TOPO_VTX_INITIATOR) == 0) {
-			pgname = ini_pgname;
-			pname = ini_pname;
+			r = topo_prop_get_string(tn, TOPO_PGROUP_INITIATOR,
+			    TOPO_PROP_INITIATOR_LABEL, &pval1, &err);
 		} else if (strcmp(name, TOPO_VTX_TARGET) == 0) {
-			pgname = tgt_pgname;
-			pname = tgt_pname;
+			r = topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
+			    TOPO_PROP_TARGET_LABEL, &pval1, &err);
+			r += topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
+			    TOPO_PROP_TARGET_LOGICAL_DISK, &pval2, &err);
 		} else {
 			goto out;
 		}
 
-		if (topo_prop_get_string(tn, pgname, pname, &pval, &err) != 0) {
-			if (err != ETOPO_PROP_NOENT) {
-				(void) fprintf(stderr, "prop lookup failed "
-				    "(%s)\n", topo_strerror(err));
-				goto out;
-			}
-
-			continue;
-		}
-		if (strcasecmp(pval, location) == 0) {
-			ret = B_TRUE;
-			topo_hdl_strfree(thp, pval);
+		if (r != 0) {
+			(void) fprintf(stderr, "fail to lookup up prop on %s=%"
+			    PRIx64 " (%s)\n", name, topo_node_instance(tn),
+			    topo_strerror(err));
 			goto out;
 		}
-		topo_hdl_strfree(thp, pval);
+
+		if (strcasecmp(pval1, location) == 0 ||
+		    (pval2 != NULL && strcasecmp(pval2, location) == 0)) {
+			ret = B_TRUE;
+			goto out;
+		}
+		topo_hdl_strfree(thp, pval1);
+		topo_hdl_strfree(thp, pval2);
 	}
+	return (ret);
 
 out:
+	topo_hdl_strfree(thp, pval1);
+	topo_hdl_strfree(thp, pval2);
 	return (ret);
 }
 
@@ -532,9 +535,12 @@ print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 			(void) printf("\n");
 		} else if (strcmp(name, TOPO_VTX_TARGET) == 0) {
 			char *location = NULL, *manuf = NULL, *model = NULL;
+			char *ctdname = NULL;
 
 			(void) topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
 			    TOPO_PROP_TARGET_LABEL, &location, &err);
+			(void) topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
+			    TOPO_PROP_TARGET_LOGICAL_DISK, &ctdname, &err);
 			(void) topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
 			    TOPO_PROP_TARGET_MANUF, &manuf, &err);
 			(void) topo_prop_get_string(tn, TOPO_PGROUP_TARGET,
@@ -544,6 +550,8 @@ print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 			    "SAS Target");
 			(void) printf("  %-20s %s\n", "Location:",
 			    location ? location : "Unknown");
+			(void) printf("  %-20s %s\n", "Logical Disk:",
+			    ctdname ? ctdname : "Unknown");
 			(void) printf("  %-20s %s\n", "Manufacturer:",
 			    manuf ? manuf : "Unknown");
 			(void) printf("  %-20s %s\n", "Model:",
@@ -551,6 +559,7 @@ print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 			(void) printf("\n");
 
 			topo_hdl_strfree(thp, location);
+			topo_hdl_strfree(thp, ctdname);
 			topo_hdl_strfree(thp, manuf);
 			topo_hdl_strfree(thp, model);
 		}
@@ -668,7 +677,7 @@ main(int argc, char *argv[])
 	 * If we're loading in a serialized snapshot, then we need to tell the
 	 * sas module not to construct a snapshot.  The tmo_enum entry
 	 * point in the sas module will check for this environment variable
-	 * and if found it will skip enuemrating the actual SAS fabric.
+	 * and if found it will skip enumerating the actual SAS fabric.
 	 */
 	if (xml_in != NULL) {
 		if (putenv("TOPO_SASNOENUM=1") != 0) {
@@ -734,8 +743,8 @@ main(int argc, char *argv[])
 	}
 
 	/*
-	 * If -j was passed then we're just going to dump a JSON version of the
-	 * digraph and then exit.
+	 * If -x was passed then we're just going to dump the serialized (XML)
+	 * snapshot of the SAS topology and then exit.
 	 */
 	if (xml_out) {
 		if (topo_digraph_serialize(thp, tdg, stdout) == 0)
@@ -748,7 +757,7 @@ main(int argc, char *argv[])
 	}
 
 	/*
-	 * Iterate through the print all of the vertices.  While iterating we
+	 * Iterate through and print all of the vertices.  While iterating we
 	 * also generate a list of initiators and a list of targets.
 	 */
 	if (topo_vertex_iter(thp, tdg, vertex_cb, &cbarg) != 0) {
@@ -756,14 +765,17 @@ main(int argc, char *argv[])
 		goto out;
 	}
 
+	/*
+	 * If -p was not specified in, then we're done.
+	 */
 	if (!cbarg.do_paths) {
 		status = EXIT_SUCCESS;
 		goto out;
 	}
 
 	/*
-	 * Find and print all unique paths between the initiators and
-	 * targets.
+	 * If -p was specified, find and print all unique paths between the
+	 * initiators and targets.
 	 */
 	for (ini = topo_list_next(&cbarg.ini_list); ini != NULL;
 	    ini = topo_list_next(ini)) {
@@ -813,8 +825,8 @@ main(int argc, char *argv[])
 		tgt = topo_list_next(tgt);
 		topo_hdl_free(thp, tmp, sizeof (struct sastopo_vertex));
 	}
-
 	status = EXIT_SUCCESS;
+
 out:
 	if (thp != NULL)  {
 		topo_hdl_strfree(thp, snapuuid);
