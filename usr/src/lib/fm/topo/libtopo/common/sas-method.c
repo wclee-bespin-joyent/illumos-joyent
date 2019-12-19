@@ -144,22 +144,87 @@ scsi_log_sense(topo_mod_t *mod, int fd, uint8_t pagecode, uchar_t *pagebuf,
 }
 
 /*
- * XXX still need to implement this.
- * - it's possible we don't need a method for that and that we can statically
- *   construct the dev-scheme FMRI from the device path.
- *
- * This is a prop method that returns the dev-scheme FMRI of the component.
- * This should be registered on the underlying nodes for initiator, expander
- * and target vertices.
+ * This is a prop method that returns the dev-scheme FMRI of an initiator or
+ * target node.
  */
 int
 sas_dev_fmri(topo_mod_t *mod, tnode_t *node, topo_version_t version,
     nvlist_t *in, nvlist_t **out)
 {
+	char *devid = NULL, *devfs_path = NULL, *fmristr = NULL;
+	const char *pg, *prop_devfs, *prop_devid, *prop_fmri;
+	const char *nodename = topo_node_name(node);
+	nvlist_t *fmri = NULL, *nvl = NULL, *pargs;
+	int err, ret = -1;
+
 	if (version > TOPO_METH_FMRI_VERSION)
 		return (topo_mod_seterrno(mod, EMOD_VER_NEW));
 
-	return (-1);
+	/*
+	 * Look for a private argument list to determine if the invoker is
+	 * trying to do a set operation and if so, return an error as this
+	 * method only supports get operations.
+	 */
+	if ((nvlist_lookup_nvlist(in, TOPO_PROP_PARGS, &pargs) == 0) &&
+	    nvlist_exists(pargs, TOPO_PROP_VAL_VAL)) {
+		topo_mod_dprintf(mod, "%s: set operation not suppported",
+		    __func__);
+		return (topo_mod_seterrno(mod, EMOD_NVL_INVAL));
+	}
+
+	if (strcmp(nodename, TOPO_VTX_INITIATOR) == 0) {
+		pg = TOPO_PGROUP_INITIATOR;
+		prop_devfs = TOPO_PROP_INITIATOR_DEVFS_PATH;
+		prop_devid = NULL;
+		prop_fmri = TOPO_PROP_INITIATOR_DEV_FMRI;
+	} else if (strcmp(nodename, TOPO_VTX_TARGET) == 0) {
+		pg = TOPO_PGROUP_TARGET;
+		prop_devfs = TOPO_PROP_TARGET_DEVFS_PATH;
+		prop_devid = TOPO_PROP_TARGET_DEVID;
+		prop_fmri = TOPO_PROP_TARGET_DEV_FMRI;
+	}
+
+	if (topo_prop_get_string(node, pg, prop_devfs, &devfs_path, &err) !=
+	    0 || (prop_devid != NULL && topo_prop_get_string(node, pg,
+	    prop_devid, &devid, &err) != 0)) {
+		topo_mod_dprintf(mod, "%s: prop lookup failed (%s)", __func__,
+		    topo_strerror(err));
+		goto err;
+	}
+	if ((fmri = topo_mod_devfmri(mod, FM_DEV_SCHEME_VERSION, devfs_path,
+	    devid)) == NULL) {
+		topo_mod_dprintf(mod, "%s: failed to construct dev fmri",
+		    __func__);
+		/* errno set */
+		goto err;
+	}
+	if (topo_mod_nvl2str(mod, fmri, &fmristr) != 0) {
+		topo_mod_dprintf(mod, "%s: failed to convert fmri to string",
+		    __func__);
+		/* errno set */
+		goto err;
+	}
+	if (topo_mod_nvalloc(mod, &nvl, NV_UNIQUE_NAME) != 0 ||
+	    nvlist_add_string(nvl, TOPO_PROP_VAL_NAME, prop_fmri) != 0 ||
+	    nvlist_add_uint32(nvl, TOPO_PROP_VAL_TYPE, TOPO_TYPE_STRING)
+	    != 0 ||
+	    nvlist_add_string(nvl, TOPO_PROP_VAL_VAL, fmristr) != 0) {
+
+		topo_mod_dprintf(mod, "%s: Failed to allocate 'out' nvlist",
+		    __func__);
+		nvlist_free(nvl);
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+	*out = nvl;
+	ret = 0;
+
+err:
+	topo_mod_strfree(mod, devid);
+	topo_mod_strfree(mod, devfs_path);
+	topo_mod_strfree(mod, fmristr);
+	nvlist_free(fmri);
+	return (ret);
 }
 
 /*
@@ -274,9 +339,10 @@ hc_iter_cb(topo_hdl_t *thp, tnode_t *node, void *arg)
 		char *sas_devfsn_short;
 
 		if (topo_prop_get_string(sas_node, TOPO_PGROUP_INITIATOR,
-		    TOPO_PROP_INITIATOR_DEVFSNAME, &sas_devfsn, &err) != 0) {
-			topo_mod_dprintf(mod, "failed to find"
-			    " devfsname (%s)", topo_strerror(err));
+		    TOPO_PROP_INITIATOR_DEVFS_PATH, &sas_devfsn, &err) != 0) {
+			topo_mod_dprintf(mod, "%s: failed to lookup %s "
+			    "property (%s)", __func__,
+			    TOPO_PGROUP_INITIATOR, topo_strerror(err));
 			goto done;
 		}
 
@@ -284,8 +350,8 @@ hc_iter_cb(topo_hdl_t *thp, tnode_t *node, void *arg)
 		    TOPO_IO_MODULE, &fmri, &err) != 0 ||
 		    topo_prop_get_string(node, TOPO_PGROUP_IO,
 		    TOPO_IO_DEV, &hc_devfsn, &err) != 0) {
-			topo_mod_dprintf(mod, "failed to get IO props"
-			    " (%s)", topo_strerror(err));
+			topo_mod_dprintf(mod, "%s: failed to get IO props"
+			    " (%s)", __func__, topo_strerror(err));
 			topo_hdl_strfree(thp, sas_devfsn);
 			goto done;
 		}
@@ -444,7 +510,7 @@ sas_hc_fmri(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 	if (strcmp(topo_node_name(node), TOPO_VTX_INITIATOR) == 0) {
 		pname = TOPO_PROP_INITIATOR_FMRI;
 	} else {
-		pname = TOPO_PROP_TARGET_FMRI;
+		pname = TOPO_PROP_TARGET_HC_FMRI;
 	}
 
 	fnvlist_add_string(result, TOPO_PROP_VAL_NAME, pname);
@@ -503,22 +569,28 @@ sas_device_props_set(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 		}
 	} else if (strcmp(topo_node_name(node), TOPO_VTX_TARGET) == 0) {
 		pgroup = TOPO_PGROUP_TARGET;
-		fmri_pname = TOPO_PROP_TARGET_FMRI;
-		if (strcmp(pname, TOPO_PROP_TARGET_MANUF) == 0) {
+		fmri_pname = TOPO_PROP_TARGET_HC_FMRI;
+		if (strcmp(pname, TOPO_PROP_TARGET_DEVFS_PATH) == 0) {
+			targ_group = TOPO_PGROUP_IO;
+			targ_prop = TOPO_IO_DEV_PATH;
+		} else if (strcmp(pname, TOPO_PROP_TARGET_DEVID) == 0) {
+			targ_group = TOPO_PGROUP_IO;
+			targ_prop = TOPO_IO_DEVID;
+		} else if (strcmp(pname, TOPO_PROP_TARGET_LABEL) == 0) {
+			targ_group = TOPO_PGROUP_PROTOCOL;
+			targ_prop = TOPO_PROP_LABEL;
+		} else if (strcmp(pname, TOPO_PROP_TARGET_LOGICAL_DISK) == 0) {
+			targ_group = TOPO_PGROUP_STORAGE;
+			targ_prop = TOPO_STORAGE_LOGICAL_DISK;
+		} else if (strcmp(pname, TOPO_PROP_TARGET_MANUF) == 0) {
 			targ_group = TOPO_PGROUP_STORAGE;
 			targ_prop = TOPO_STORAGE_MANUFACTURER;
 		} else if (strcmp(pname, TOPO_PROP_TARGET_MODEL) == 0) {
 			targ_group = TOPO_PGROUP_STORAGE;
 			targ_prop = TOPO_STORAGE_MODEL;
-		} else if (strcmp(pname, TOPO_PROP_TARGET_LOGICAL_DISK) == 0) {
-			targ_group = TOPO_PGROUP_STORAGE;
-			targ_prop = TOPO_STORAGE_LOGICAL_DISK;
 		} else if (strcmp(pname, TOPO_PROP_TARGET_SERIAL) == 0) {
 			targ_group = TOPO_PGROUP_STORAGE;
 			targ_prop = TOPO_STORAGE_SERIAL_NUMBER;
-		} else if (strcmp(pname, TOPO_PROP_TARGET_LABEL) == 0) {
-			targ_group = TOPO_PGROUP_PROTOCOL;
-			targ_prop = TOPO_PROP_LABEL;
 		}
 	}
 
@@ -526,6 +598,7 @@ sas_device_props_set(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 		topo_mod_dprintf(mod, "failed to get fmri for %s=%" PRIx64
 		    " (%s)", topo_node_name(node), topo_node_instance(node),
 		    topo_strerror(err));
+		(void) topo_mod_seterrno(mod, err);
 		goto done;
 	}
 
@@ -533,6 +606,7 @@ sas_device_props_set(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 		topo_mod_dprintf(mod, "fmri_str2nvl failed for %s=%" PRIx64
 		    " (%s)", topo_node_name(node), topo_node_instance(node),
 		    topo_strerror(err));
+		(void) topo_mod_seterrno(mod, err);
 		goto done;
 	}
 
@@ -1586,7 +1660,7 @@ sas_get_phy_link_rate(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 		return (topo_mod_seterrno(mod, ETOPO_METHOD_VERNEW));
 
 	/*
-	 * Now look for a private argument list to determine if the invoker is
+	 * Look for a private argument list to determine if the invoker is
 	 * trying to do a set operation and if so, return an error as this
 	 * method only supports get operations.
 	 */

@@ -29,9 +29,9 @@
  *   --------------------
  *   Initiator nodes are populated with the following public properties:
  *   - manufacturer
- *   - model name
- *   - devfs name
- *   - location label
+ *   - model
+ *   - devfs-name
+ *   - location
  *   - hc fmri
  *
  * port
@@ -57,9 +57,14 @@
  *   -----------------
  *   Target nodes are populated with the following public properties.
  *   - manufacturer
- *   - model name
- *   - serial number
- *   - hc fmri
+ *   - model
+ *   - serial-number
+ *   - location
+ *   - logical-disk
+ *   - devfs-path
+ *   - devid
+ *   - speed-in-rpm
+ *   - hc-fmri
  *
  * XXX - It'd be really cool if we could check for a ZFS pool config and
  * try to match the target to a leaf vdev and include the zfs-scheme FMRI of
@@ -213,6 +218,9 @@ static const topo_method_t sas_initiator_methods[] = {
 	{ TOPO_METH_SAS_DEV_PROP, TOPO_METH_SAS_DEV_PROP_DESC,
 	    TOPO_METH_SAS_DEV_PROP_VERSION, TOPO_STABILITY_INTERNAL,
 	    sas_device_props_set },
+	{ TOPO_METH_SAS2DEV, TOPO_METH_SAS2DEV_DESC,
+	    TOPO_METH_SAS2DEV_VERSION, TOPO_STABILITY_INTERNAL,
+	    sas_dev_fmri },
 	{ NULL }
 };
 
@@ -230,6 +238,9 @@ static const topo_method_t sas_target_methods[] = {
 	{ TOPO_METH_SAS_DEV_PROP, TOPO_METH_SAS_DEV_PROP_DESC,
 	    TOPO_METH_SAS_DEV_PROP_VERSION, TOPO_STABILITY_INTERNAL,
 	    sas_device_props_set },
+	{ TOPO_METH_SAS2DEV, TOPO_METH_SAS2DEV_DESC,
+	    TOPO_METH_SAS2DEV_VERSION, TOPO_STABILITY_INTERNAL,
+	    sas_dev_fmri },
 	{ NULL }
 };
 
@@ -325,6 +336,8 @@ static int
 sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 {
 	const topo_method_t *propmethods;
+	const char *nodename = topo_node_name(tn);
+	topo_instance_t nodeinst = topo_node_instance(tn);
 	nvlist_t *nvl = NULL;
 	int err, ret = -1;
 
@@ -350,39 +363,39 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 	}
 
 	if (strcmp(pgname, TOPO_PGROUP_TARGET) == 0) {
-		fnvlist_add_string(nvl, "pname", TOPO_PROP_TARGET_FMRI);
+		topo_type_t ptype = TOPO_TYPE_STRING;
 
-		if (topo_prop_method_register(tn, pgname, TOPO_PROP_TARGET_FMRI,
-		    TOPO_TYPE_STRING, TOPO_METH_SAS2HC, nvl, &err) != 0) {
+		fnvlist_add_string(nvl, "pname", TOPO_PROP_TARGET_HC_FMRI);
+
+		if (topo_prop_method_register(tn, pgname,
+		    TOPO_PROP_TARGET_HC_FMRI, TOPO_TYPE_STRING,
+		    TOPO_METH_SAS2HC, nvl, &err) != 0) {
 			topo_mod_dprintf(mod, "Failed to set "
 			    "up hc fmri cb on %s=%" PRIx64 " (%s)",
-			    topo_node_name(tn),
-			    topo_node_instance(tn),
-			    topo_strerror(err));
+			    nodename, nodeinst, topo_strerror(err));
 			goto err;
 		}
 
 		const char *props[] = {
+		    TOPO_PROP_TARGET_DEVFS_PATH,
+		    TOPO_PROP_TARGET_DEVID,
+		    TOPO_PROP_TARGET_LABEL,
+		    TOPO_PROP_TARGET_LOGICAL_DISK,
 		    TOPO_PROP_TARGET_MANUF,
 		    TOPO_PROP_TARGET_MODEL,
-		    TOPO_PROP_TARGET_SERIAL,
-		    TOPO_PROP_TARGET_LOGICAL_DISK,
-		    TOPO_PROP_TARGET_LABEL
+		    TOPO_PROP_TARGET_SERIAL
 		};
 
 		for (uint_t i = 0; i < sizeof (props) / sizeof (props[0]);
 		    i++) {
-			fnvlist_remove(nvl, "pname");
 			fnvlist_add_string(nvl, "pname", props[i]);
 
 			if (topo_prop_method_register(tn, pgname,
-			    props[i], TOPO_TYPE_STRING,
-			    TOPO_METH_SAS_DEV_PROP, nvl, &err) != 0) {
-				topo_mod_dprintf(mod, "Failed to set "
-				    "up prop cb on %s=%" PRIx64 " (%s)",
-				    topo_node_name(tn),
-				    topo_node_instance(tn),
-				    topo_strerror(err));
+			    props[i], ptype, TOPO_METH_SAS_DEV_PROP, nvl,
+			    &err) != 0) {
+				topo_mod_dprintf(mod, "Failed to register "
+				    "up propmethod on %s=%" PRIx64 " (%s)",
+				    nodename, nodeinst, topo_strerror(err));
 				goto err;
 			}
 			if (topo_prop_setnonvolatile(tn, pgname, props[i],
@@ -392,8 +405,24 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 				goto err;
 			}
 		}
+		if (topo_prop_method_register(tn, pgname,
+		    TOPO_PROP_TARGET_DEV_FMRI, ptype, TOPO_METH_SAS2DEV,
+		    nvl, &err) != 0) {
+			topo_mod_dprintf(mod, "Failed to register propmethod "
+			    "on %s=%" PRIx64 " (%s)", nodename, nodeinst,
+			    topo_strerror(err));
+			goto err;
+		}
+		if (topo_prop_setnonvolatile(tn, pgname,
+		    TOPO_PROP_TARGET_DEV_FMRI, &err) != 0) {
+			topo_mod_dprintf(mod, "Failed to nonvolatile flag for "
+			    "prop %s/%s", pgname, TOPO_PROP_TARGET_DEV_FMRI);
+			goto err;
+		}
 
 	} else if (strcmp(pgname, TOPO_PGROUP_INITIATOR) == 0) {
+		topo_type_t ptype = TOPO_TYPE_STRING;
+
 		fnvlist_add_string(nvl, "pname", TOPO_PROP_INITIATOR_FMRI);
 
 		if (topo_prop_method_register(tn, pgname,
@@ -401,9 +430,7 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 		    TOPO_TYPE_STRING, TOPO_METH_SAS2HC, nvl, &err) != 0) {
 			topo_mod_dprintf(mod, "Failed to set "
 			    "hc fmri cb on %s=%" PRIx64 " (%s)",
-			    topo_node_name(tn),
-			    topo_node_instance(tn),
-			    topo_strerror(err));
+			    nodename, nodeinst, topo_strerror(err));
 			goto err;
 		}
 
@@ -418,13 +445,10 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 			fnvlist_add_string(nvl, "pname", props[i]);
 
 			if (topo_prop_method_register(tn, pgname, props[i],
-			    TOPO_TYPE_STRING, TOPO_METH_SAS_DEV_PROP, nvl, &err)
-			    != 0) {
+			    ptype, TOPO_METH_SAS_DEV_PROP, nvl, &err) != 0) {
 				topo_mod_dprintf(mod, "Failed to set "
 				    "up prop cb on %s=%" PRIx64 " (%s)",
-				    topo_node_name(tn),
-				    topo_node_instance(tn),
-				    topo_strerror(err));
+				    nodename, nodeinst, topo_strerror(err));
 				goto err;
 			}
 			if (topo_prop_setnonvolatile(tn, pgname, props[i],
@@ -433,6 +457,20 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 				    "flag for prop %s/%s", pgname, props[i]);
 				goto err;
 			}
+		}
+		if (topo_prop_method_register(tn, pgname,
+		    TOPO_PROP_INITIATOR_DEV_FMRI, ptype, TOPO_METH_SAS2DEV,
+		    nvl, &err) != 0) {
+			topo_mod_dprintf(mod, "Failed to register propmethod "
+			    "on %s=%" PRIx64 " (%s)", nodename, nodeinst,
+			    topo_strerror(err));
+			goto err;
+		}
+		if (topo_prop_setnonvolatile(tn, pgname,
+		    TOPO_PROP_INITIATOR_DEV_FMRI, &err) != 0) {
+			topo_mod_dprintf(mod, "Failed to nonvolatile flag for "
+			    "prop %s/%s", pgname, TOPO_PROP_INITIATOR_DEV_FMRI);
+			goto err;
 		}
 	} else if (strcmp(pgname, TOPO_PGROUP_SASPORT) == 0) {
 		const char *errprops[] = {
@@ -458,9 +496,7 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 			    &err) != 0) {
 				topo_mod_dprintf(mod, "Failed to set "
 				    "up prop cb on %s=%" PRIx64 " (%s)",
-				    topo_node_name(tn),
-				    topo_node_instance(tn),
-				    topo_strerror(err));
+				    nodename, nodeinst, topo_strerror(err));
 				goto err;
 			}
 		}
@@ -478,9 +514,7 @@ sas_prop_method_register(topo_mod_t *mod, tnode_t *tn, const char *pgname)
 			    arg_nvl, &err) != 0) {
 				topo_mod_dprintf(mod, "Failed to set "
 				    "up prop cb on %s=%" PRIx64 " (%s)",
-				    topo_node_name(tn),
-				    topo_node_instance(tn),
-				    topo_strerror(err));
+				    nodename, nodeinst, topo_strerror(err));
 				nvlist_free(arg_nvl);
 				goto err;
 			}
@@ -852,7 +886,7 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 	topo_node_setspecific(tn, port_info);
 
 	if (topo_prop_set_string(tn, TOPO_PGROUP_EXPANDER,
-	    TOPO_PROP_EXPANDER_DEVFSNAME, TOPO_PROP_IMMUTABLE,
+	    TOPO_PROP_EXPANDER_DEVFS_PATH, TOPO_PROP_IMMUTABLE,
 	    smp_path, &err) != 0) {
 		topo_mod_dprintf(mod, "Failed to set props on %s=%" PRIx64,
 		    topo_node_name(tn), topo_node_instance(tn));
@@ -1397,7 +1431,7 @@ sas_enum_hba_port(topo_mod_t *mod, sas_hba_enum_t *hbadata)
 		}
 
 		/*
-		 * Set the devfs name for this initiator so we can use it to
+		 * Set the devfs path for this initiator so we can use it to
 		 * correlate with corresponding hc topo node later.
 		 *
 		 * The info we get from libsmhbaapi w.r.t. manufacturer and
@@ -1408,7 +1442,7 @@ sas_enum_hba_port(topo_mod_t *mod, sas_hba_enum_t *hbadata)
 		 */
 		tn = topo_vertex_node(hbadata->initiator);
 		if (topo_prop_set_string(tn, TOPO_PGROUP_INITIATOR,
-		    TOPO_PROP_INITIATOR_DEVFSNAME, TOPO_PROP_IMMUTABLE,
+		    TOPO_PROP_INITIATOR_DEVFS_PATH, TOPO_PROP_IMMUTABLE,
 		    hbadata->ad_attrs->HBASymbolicName, &err) != 0) {
 			goto err;
 		}
