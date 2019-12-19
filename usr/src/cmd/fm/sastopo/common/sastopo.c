@@ -34,7 +34,7 @@
 
 
 static const char *pname;
-static const char optstr[] = "Cdf:hpR:Vx";
+static const char optstr[] = "Cdf:hl:pR:Vx";
 
 static void
 usage()
@@ -44,13 +44,14 @@ usage()
 	    "Print all nodes on the SAS fabric:\n"
 	    "  %s [-d][-V][-R root][FMRI pattern]\n\n"
 	    "Print all the paths between SAS initiators and targets:\n"
-	    "  %s -p [-d][-R root]\n\n"
-	    "Dump SAS topology to XML\n"
+	    "  %s -p [-d][-V][-R root][-l location]\n\n"
+	    "Dump SAS topology snapshot to XML\n"
 	    "  %s -x [-d][-R root]\n\n"
-	    "Read in SAS topology from XML\n"
+	    "Read in SAS topology snapshot from XML\n"
 	    "  %s -f <XML file> [-d][-R root]\n\n"
 	    "-C\t\tdump core at exit\n"
 	    "-d\t\tenable debug messages\n"
+	    "-l\t\tfilter results based on FRU location\n"
 	    "-h\t\tprint this usage message\n"
 	    "-R\t\toperate against alternate root directory\n"
 	    "-V\t\tverbose mode\n\n", pname, pname, pname, pname);
@@ -67,6 +68,7 @@ struct cb_arg {
 	boolean_t verbose;
 	boolean_t do_paths;
 	const char *fmri_pattern;
+	const char *location;
 };
 
 static int
@@ -386,14 +388,76 @@ err:
 	}
 }
 
+/*
+ * This function returns B_TRUE if either the initiator or the target node in
+ * the specified path has a location value that matches the one passed in.  It
+ * returns B_FALSE otherwise.  It also returns B_FALSE if an error is
+ * encountered.
+ */
+static boolean_t
+path_matches_location(topo_hdl_t *thp, topo_path_t *path, const char *location)
+{
+	topo_path_component_t *comp;
+	boolean_t ret = B_FALSE;
+	const char *ini_pgname = TOPO_PGROUP_INITIATOR;
+	const char *ini_pname = TOPO_PROP_INITIATOR_LABEL;
+	const char *tgt_pgname = TOPO_PGROUP_TARGET;
+	const char *tgt_pname = TOPO_PROP_TARGET_LABEL;
+
+	for (comp = topo_list_next(&path->tsp_components); comp != NULL;
+	    comp = topo_list_next(comp)) {
+
+		topo_vertex_t *vtx = comp->tspc_vertex;
+		tnode_t *tn = topo_vertex_node(vtx);
+		char *name = topo_node_name(tn), *pval;
+		const char *pgname, *pname;
+		int err;
+
+		if (strcmp(name, TOPO_VTX_EXPANDER) == 0 ||
+		    strcmp(name, TOPO_VTX_PORT) == 0) {
+			continue;
+		} else if (strcmp(name, TOPO_VTX_INITIATOR) == 0) {
+			pgname = ini_pgname;
+			pname = ini_pname;
+		} else if (strcmp(name, TOPO_VTX_TARGET) == 0) {
+			pgname = tgt_pgname;
+			pname = tgt_pname;
+		} else {
+			goto out;
+		}
+
+		if (topo_prop_get_string(tn, pgname, pname, &pval, &err) != 0) {
+			if (err != ETOPO_PROP_NOENT) {
+				(void) fprintf(stderr, "prop lookup failed "
+				    "(%s)\n", topo_strerror(err));
+				goto out;
+			}
+
+			continue;
+		}
+		if (strcasecmp(pval, location) == 0) {
+			ret = B_TRUE;
+			topo_hdl_strfree(thp, pval);
+			goto out;
+		}
+		topo_hdl_strfree(thp, pval);
+	}
+
+out:
+	return (ret);
+}
+
 static void
-print_path(topo_hdl_t *thp, topo_path_t *path, boolean_t do_verbose)
+print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 {
 	topo_path_component_t *comp, *prev_comp = NULL;
 
+	if (! path_matches_location(thp, path, cbarg->location))
+		return;
+
 	(void) printf("%s\n", path->tsp_fmristr);
 
-	if (! do_verbose)
+	if (! cbarg->verbose)
 		return;
 
 	for (comp = topo_list_next(&path->tsp_components); comp != NULL;
@@ -559,6 +623,9 @@ main(int argc, char *argv[])
 				return (EXIT_USAGE);
 			case 'p':
 				cbarg.do_paths = B_TRUE;
+				break;
+			case 'l':
+				cbarg.location = optarg;
 				break;
 			case 'R':
 				root = optarg;
@@ -726,7 +793,7 @@ main(int argc, char *argv[])
 				continue;
 			}
 			for (uint_t i = 0; i < np; i++) {
-				print_path(thp, paths[i], cbarg.verbose);
+				print_path(thp, paths[i], &cbarg);
 				topo_path_destroy(thp, paths[i]);
 			}
 			topo_hdl_free(thp, paths, np * sizeof (topo_path_t *));
