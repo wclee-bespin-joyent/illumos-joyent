@@ -27,6 +27,8 @@ extern "C" {
 
 #define	TOPO_PGROUP_EXPANDER		"expander-properties"
 #define	TOPO_PROP_EXPANDER_DEVFS_PATH	"devfs-path"
+#define	TOPO_PROP_EXPANDER_MANUF	"manufacturer"
+#define	TOPO_PROP_EXPANDER_MODEL	"model"
 
 #define	TOPO_PGROUP_INITIATOR		"initiator-properties"
 #define	TOPO_PROP_INITIATOR_DEV_FMRI	"dev-fmri"

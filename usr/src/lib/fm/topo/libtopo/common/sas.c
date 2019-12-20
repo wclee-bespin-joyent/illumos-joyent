@@ -827,6 +827,10 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 	smp_target_t *tgt = NULL;
 	smp_action_t *axn = NULL;
 	smp_report_general_resp_t *report_resp = NULL;
+	smp_report_manufacturer_info_resp_t *manuf_resp = NULL;
+	const char *nodename;
+	topo_instance_t nodeinst;
+	char exp_vid[9], exp_pid[17], *space;
 
 	smp_function_t func;
 	smp_result_t result;
@@ -858,7 +862,7 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 		goto done;
 	}
 
-	smp_action_get_response(axn, &result, (void **) &smp_resp,
+	smp_action_get_response(axn, &result, (void **)&smp_resp,
 	    &smp_resp_len);
 	smp_action_free(axn);
 
@@ -885,11 +889,69 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 	tn = topo_vertex_node(expd_vtx);
 	topo_node_setspecific(tn, port_info);
 
+	nodename = topo_node_name(tn);
+	nodeinst = topo_node_instance(tn);
+
 	if (topo_prop_set_string(tn, TOPO_PGROUP_EXPANDER,
 	    TOPO_PROP_EXPANDER_DEVFS_PATH, TOPO_PROP_IMMUTABLE,
 	    smp_path, &err) != 0) {
 		topo_mod_dprintf(mod, "Failed to set props on %s=%" PRIx64,
-		    topo_node_name(tn), topo_node_instance(tn));
+		    nodename, nodeinst);
+		ret = -1;
+		goto done;
+	}
+
+	/*
+	 * Send a REPORT MANUFACTURER INFO command to the expander to retrieve
+	 * the manufacturer and model information.
+	 *
+	 * See the SPL section 9.4.4.4
+	 */
+	if ((axn = smp_action_alloc(SMP_FUNC_REPORT_MANUFACTURER_INFO, tgt,
+	    0)) == NULL) {
+		topo_mod_dprintf(mod, "%s: failed to allocate smp action (%s)",
+		    __func__, smp_errmsg());
+		ret = -1;
+		goto done;
+	}
+	if (smp_exec(axn, tgt) != 0) {
+		topo_mod_dprintf(mod, "%s: smp_exec of cmd 0x%x failed (%s)",
+		    __func__, SMP_FUNC_REPORT_MANUFACTURER_INFO, smp_errmsg());
+		smp_action_free(axn);
+		ret = -1;
+		goto done;
+	}
+	smp_action_get_response(axn, &result, (void **)&smp_resp,
+	    &smp_resp_len);
+	manuf_resp = (smp_report_manufacturer_info_resp_t *)smp_resp;
+	smp_action_free(axn);
+
+	/*
+	 * SMP strings are padded with trailing whitespace and not
+	 * NUL-terminated.  To deal with this, we copy the strings into buffers
+	 * that are large enough to hold the max string + a NUL.  Then we look
+	 * for the first space character in the copied string and, if found,
+	 * set it to NUL.
+	 */
+	(void) strlcpy(exp_vid, manuf_resp->srmir_vendor_identification,
+	    sizeof (exp_vid));
+	(void) strlcpy(exp_pid, manuf_resp->srmir_product_identification,
+	    sizeof (exp_pid));
+
+	if ((space = strchr(exp_vid, ' ')) != NULL)
+		*space = '\0';
+	if ((space = strchr(exp_pid, ' ')) != NULL)
+		*space = '\0';
+
+	if (topo_prop_set_string(tn, TOPO_PGROUP_EXPANDER,
+	    TOPO_PROP_EXPANDER_MANUF, TOPO_PROP_IMMUTABLE, exp_vid, &err) !=
+	    0 ||
+	    topo_prop_set_string(tn, TOPO_PGROUP_EXPANDER,
+	    TOPO_PROP_EXPANDER_MODEL, TOPO_PROP_IMMUTABLE, exp_pid, &err) !=
+	    0) {
+		topo_mod_dprintf(mod, "%s: failed to set properties on %s=%"
+		    PRIx64 " (%s)", __func__, nodename, nodeinst,
+		    topo_strerror(err));
 		ret = -1;
 		goto done;
 	}
@@ -988,8 +1050,7 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 			    TOPO_PROP_SASPORT_TYPE, TOPO_PROP_IMMUTABLE,
 			    TOPO_SASPORT_TYPE_EXPANDER, &err) != 0) {
 				topo_mod_dprintf(mod, "Failed to set props on "
-				    "%s=%" PRIx64,
-				    topo_node_name(tn), topo_node_instance(tn));
+				    "%s=%" PRIx64, nodename, nodeinst);
 				ret = -1;
 				goto done;
 			}
@@ -1031,8 +1092,7 @@ sas_expander_discover(topo_mod_t *mod, const char *smp_path)
 			    TOPO_PROP_SASPORT_ANAME, TOPO_PROP_IMMUTABLE, "TBD",
 			    &err) != 0) {
 				topo_mod_dprintf(mod, "Failed to set props on "
-				    "%s=%" PRIx64 " (%s)",
-				    topo_node_name(tn), topo_node_instance(tn),
+				    "%s=%" PRIx64 " (%s)", nodename, nodeinst,
 				    topo_strerror(err));
 				ret = -1;
 				goto done;
@@ -1420,7 +1480,6 @@ sas_enum_hba_port(topo_mod_t *mod, sas_hba_enum_t *hbadata)
 	 * Only create one logical initiator vertex for all of the HBA ports.
 	 */
 	/*
-	 * XXX what to use for HBA phy info?
 	 * phyinfo.start_phy = 0;
 	 * phyinfo.end_phy = num_phys - 1;
 	 */
