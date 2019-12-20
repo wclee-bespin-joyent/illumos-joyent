@@ -530,9 +530,23 @@ print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 
 			print_path_port(thp, tn);
 		} else if (strcmp(name, TOPO_VTX_EXPANDER) == 0) {
+			char *manuf = NULL, *model = NULL;
+
+			(void) topo_prop_get_string(tn, TOPO_PGROUP_EXPANDER,
+			    TOPO_PROP_EXPANDER_MANUF, &manuf, &err);
+			(void) topo_prop_get_string(tn, TOPO_PGROUP_EXPANDER,
+			    TOPO_PROP_EXPANDER_MODEL, &model, &err);
+
 			(void) printf("  %-20s %s\n", "Node Type:",
 			    "SAS Expander");
+			(void) printf("  %-20s %s\n", "Manufacturer:",
+			    manuf ? manuf : "Unknown");
+			(void) printf("  %-20s %s\n", "Model:",
+			    model ? model : "Unknown");
 			(void) printf("\n");
+
+			topo_hdl_strfree(thp, manuf);
+			topo_hdl_strfree(thp, model);
 		} else if (strcmp(name, TOPO_VTX_TARGET) == 0) {
 			char *location = NULL, *manuf = NULL, *model = NULL;
 			char *ctdname = NULL;
