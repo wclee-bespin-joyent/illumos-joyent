@@ -455,7 +455,8 @@ print_path(topo_hdl_t *thp, topo_path_t *path, struct cb_arg *cbarg)
 {
 	topo_path_component_t *comp, *prev_comp = NULL;
 
-	if (! path_matches_location(thp, path, cbarg->location))
+	if (cbarg->location != NULL &&
+	    ! path_matches_location(thp, path, cbarg->location))
 		return;
 
 	(void) printf("%s\n", path->tsp_fmristr);
