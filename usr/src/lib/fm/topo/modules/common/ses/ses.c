@@ -264,11 +264,11 @@ static const topo_method_t ses_component_methods[] = {
 	{ NULL }
 };
 
-#define	TOPO_METH_JOYENT_S10G5_LABEL		"joyent_s10g5_bay_label"
-#define	TOPO_METH_JOYENT_S10G5_LABEL_DESC	\
-	"compute bay labels on Joyent-S10G5 platform"
-#define	TOPO_METH_JOYENT_S10G5_LABEL_VERSION	0
-static int joyent_s10g5_bay_label(topo_mod_t *, tnode_t *, topo_version_t,
+#define	TOPO_METH_SMCI_4U36_LABEL		"smci_4u36_bay_label"
+#define	TOPO_METH_SMCI_4U36_LABEL_DESC	\
+	"compute bay labels on SMCI 4U36 storage platform variants"
+#define	TOPO_METH_SMCI_4U36_LABEL_VERSION	0
+static int smci_4u36_bay_label(topo_mod_t *, tnode_t *, topo_version_t,
     nvlist_t *, nvlist_t **);
 
 static const topo_method_t ses_bay_methods[] = {
@@ -277,9 +277,9 @@ static const topo_method_t ses_bay_methods[] = {
 	{ TOPO_METH_OCCUPIED, TOPO_METH_OCCUPIED_DESC,
 	    TOPO_METH_OCCUPIED_VERSION, TOPO_STABILITY_INTERNAL,
 	    topo_mod_hc_occupied },
-	{ TOPO_METH_JOYENT_S10G5_LABEL, TOPO_METH_JOYENT_S10G5_LABEL_DESC,
-	    TOPO_METH_JOYENT_S10G5_LABEL_VERSION, TOPO_STABILITY_INTERNAL,
-	    joyent_s10g5_bay_label },
+	{ TOPO_METH_SMCI_4U36_LABEL, TOPO_METH_SMCI_4U36_LABEL_DESC,
+	    TOPO_METH_SMCI_4U36_LABEL_VERSION, TOPO_STABILITY_INTERNAL,
+	    smci_4u36_bay_label },
 	{ NULL }
 };
 
@@ -297,6 +297,40 @@ static const topo_method_t ses_enclosure_methods[] = {
 	    TOPO_STABILITY_INTERNAL, ses_enc_enum_facility },
 	{ NULL }
 };
+
+/*
+ * The bay_label_overrides table can be used to map a server product ID to a
+ * topo method that will be invoked to override the value of the label property
+ * for all bay nodes.  By default the property value is static, derived from
+ * the corresponding SES array device element's descriptor string.
+ */
+typedef struct ses_label_overrides {
+	const char *slbl_product;
+	const char *slbl_mname;
+} ses_label_overrides_t;
+
+/*
+ * This table covers three generations of SMCI's 4U 36-bay storage storage
+ * server (and the Joyent-branded versions).  There was also an Ivy Bridge
+ * variant which has been omitted due to an inability to find one to test this
+ * method.
+ */
+static const ses_label_overrides_t bay_label_overrides[] = {
+	/* Sandy Bridge variant */
+	{ "SSG-6047R-E1R36L", TOPO_METH_SMCI_4U36_LABEL },
+	{ "Joyent-Storage-Platform-5001", TOPO_METH_SMCI_4U36_LABEL },
+
+	/* Broadwell variant */
+	{ "SSG-6048R-E1CR36L", TOPO_METH_SMCI_4U36_LABEL },
+	{ "Joyent-Storage-Platform-7001", TOPO_METH_SMCI_4U36_LABEL },
+
+	/* Skylake variant */
+	{ "SSG-6049P-E1CR36L", TOPO_METH_SMCI_4U36_LABEL },
+	{ "Joyent-S10G5", TOPO_METH_SMCI_4U36_LABEL }
+};
+
+#define	N_BAY_LBL_OVERRIDES (sizeof (bay_label_overrides) / \
+	sizeof (bay_label_overrides[0]))
 
 /*
  * Functions for tracking ses devices which we were unable to open. We retry
@@ -1426,6 +1460,18 @@ error:
 	return (err);
 }
 
+static const char *
+lookup_bay_override(const char *product_id)
+{
+	for (uint i = 0; i < N_BAY_LBL_OVERRIDES; i++) {
+		if (strcmp(product_id,
+		    bay_label_overrides[i].slbl_product) == 0) {
+			return (bay_label_overrides[i].slbl_mname);
+		}
+	}
+	return (NULL);
+}
+
 /*
  * Callback to create a basic node (bay, psu, fan, or controller and expander).
  */
@@ -1530,6 +1576,7 @@ ses_create_generic(ses_enum_data_t *sdp, ses_enum_node_t *snp, tnode_t *pnode,
 		goto error;
 
 	if (strcmp(nodename, BAY) == 0) {
+		const char *label_method;
 		char *product;
 		nvlist_t *args = NULL;
 
@@ -1544,10 +1591,6 @@ ses_create_generic(ses_enum_data_t *sdp, ses_enum_node_t *snp, tnode_t *pnode,
 		}
 
 		/*
-		 * This registers a custom property method for computing the
-		 * correct location labels for the bay and disk nodes on the
-		 * Joyent-S10G5 platform.
-		 *
 		 * Ideally we'd perform this sort of override with a platform
 		 * specific XML map file, and that would work here if we only
 		 * wanted to override the bay node label.  However, we'd also
@@ -1560,15 +1603,15 @@ ses_create_generic(ses_enum_data_t *sdp, ses_enum_node_t *snp, tnode_t *pnode,
 			(void) topo_mod_seterrno(mod, EMOD_NOMEM);
 			goto error;
 		}
-		if (strcmp(product, "Joyent-S10G5") == 0) {
+		if ((label_method = lookup_bay_override(product)) != NULL) {
 			if (topo_mod_nvalloc(mod, &args, NV_UNIQUE_NAME) != 0 ||
 			    topo_prop_method_register(tn, TOPO_PGROUP_PROTOCOL,
-			    TOPO_PROP_LABEL, TOPO_TYPE_STRING,
-			    TOPO_METH_JOYENT_S10G5_LABEL, args, &err)) {
+			    TOPO_PROP_LABEL, TOPO_TYPE_STRING, label_method,
+			    args, &err)) {
 				topo_mod_dprintf(mod,
 				    "Failed to register method: %s on %s=%"
-				    PRIu64, TOPO_METH_JOYENT_S10G5_LABEL,
-				    BAY, topo_node_instance(tn));
+				    PRIu64, label_method, BAY,
+				    topo_node_instance(tn));
 				topo_mod_strfree(mod, product);
 				nvlist_free(args);
 				goto error;
@@ -3684,15 +3727,23 @@ error:
 	return (err);
 }
 
-#define	JS10G5_FRONT_EXPANDER_PID	"SMC-SC846P"
-#define	JS10G5_REAR_EXPANDER_PID	"LSI-SAS3x28"
+/*
+ * Different generations of SMCI's 4U36 storage servers used different models
+ * of front and rear SAS expanders.
+ */
+#define	SMCI4U36_FRONT_EXPANDER_PID1	"LSI-SAS2X36"
+#define	SMCI4U36_FRONT_EXPANDER_PID2	"LSI-SAS3x40"
+#define	SMCI4U36_FRONT_EXPANDER_PID3	"SMC-SC846P"
+
+#define	SMCI4U36_REAR_EXPANDER_PID1	"LSI-CORP-SAS2X28"
+#define	SMCI4U36_REAR_EXPANDER_PID2	"LSI-SAS3x28"
 
 static int
-joyent_s10g5_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
+smci_4u36_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
     nvlist_t *in, nvlist_t **out)
 {
 	int err, ret = -1;
-	nvlist_t *pargs, *auth, *nvl, *fmri = NULL;
+	nvlist_t *pargs, *auth, *nvl = NULL, *fmri = NULL;
 	char *label, *product_id;
 
 	/*
@@ -3722,10 +3773,13 @@ joyent_s10g5_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 	}
 	nvlist_free(fmri);
 
-	if (strcmp(product_id, JS10G5_FRONT_EXPANDER_PID) == 0) {
+	if (strcmp(product_id, SMCI4U36_FRONT_EXPANDER_PID1) == 0 ||
+	    strcmp(product_id, SMCI4U36_FRONT_EXPANDER_PID2) == 0 ||
+	    strcmp(product_id, SMCI4U36_FRONT_EXPANDER_PID3) == 0) {
 		err = asprintf(&label, "Front Slot %" PRIu64,
 		    topo_node_instance(node));
-	} else if (strcmp(product_id, JS10G5_REAR_EXPANDER_PID) == 0) {
+	} else if (strcmp(product_id, SMCI4U36_REAR_EXPANDER_PID1) == 0 ||
+	    strcmp(product_id, SMCI4U36_REAR_EXPANDER_PID2) == 0) {
 		err = asprintf(&label, "Rear Slot %" PRIu64,
 		    topo_node_instance(node));
 	} else {
@@ -3741,8 +3795,8 @@ joyent_s10g5_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 
 	if (topo_mod_nvalloc(mod, &nvl, NV_UNIQUE_NAME) != 0 ||
 	    nvlist_add_string(nvl, TOPO_PROP_VAL_NAME, TOPO_PROP_LABEL) != 0 ||
-	    nvlist_add_uint32(nvl, TOPO_PROP_VAL_TYPE, TOPO_TYPE_STRING)
-	    != 0 ||
+	    nvlist_add_uint32(nvl, TOPO_PROP_VAL_TYPE, TOPO_TYPE_STRING) !=
+	    0 ||
 	    nvlist_add_string(nvl, TOPO_PROP_VAL_VAL, label)
 	    != 0) {
 		topo_mod_dprintf(mod, "Failed to allocate 'out' nvlist");
