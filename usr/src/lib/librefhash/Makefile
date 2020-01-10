@@ -15,8 +15,6 @@
 
 include ../Makefile.lib
 
-HDRDIR = common
-
 SUBDIRS = $(MACH)
 $(BUILD64)SUBDIRS += $(MACH64)
 

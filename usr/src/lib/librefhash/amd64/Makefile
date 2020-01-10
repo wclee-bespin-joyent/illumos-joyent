@@ -10,10 +10,10 @@
 #
 
 #
-# Copyright (c) 2014 Joyent, Inc.  All rights reserved.
+# Copyright 2020 Joyent, Inc.
 #
 
 include ../Makefile.com
 include ../../Makefile.lib.64
 
-install: all $(ROOTLIBS64) $(ROOTLINKS64) $(ROOTLINT64)
+install: all $(ROOTLIBS64) $(ROOTLINKS64)
