@@ -814,6 +814,12 @@ soft_aes_encrypt_update(soft_session_t *session_p, CK_BYTE_PTR pData,
 	size_t out_len;
 	int rc;
 
+	/*
+	 * If pData is NULL, we should have zero bytes to process, and
+	 * the aes_encrypt_contiguous_blocks() call will be an effective no-op.
+	 */
+	IMPLY(pData == NULL, ulDataLen == 0);
+
 	/* Check size of the output buffer */
 	switch (mech) {
 	case CKM_AES_CMAC:
@@ -970,10 +976,10 @@ soft_aes_decrypt_update(soft_session_t *session_p, CK_BYTE_PTR pEncryptedData,
 		 *
 		 * Some things to note:
 		 *  - The above semantics will cause aes_ctx->ac_remainder to
-		 *  never accumulate more than AES_BLOCK_LEN bytes of ciphertext.
-		 *  Once we reach at least AES_BLOCK_LEN + 1 bytes, we will
-		 *  decrypt the contents of aes_ctx->ac_remainder by one of
-		 *  the last two scenarios described above.
+		 *  never accumulate more than AES_BLOCK_LEN bytes of
+		 *  ciphertext. Once we reach at least AES_BLOCK_LEN + 1 bytes,
+		 *  we will decrypt the contents of aes_ctx->ac_remainder by one
+		 *  of the last two scenarios described above.
 		 *
 		 *  - We must always end up with AES_BLOCK_LEN bytes of data
 		 *  in aes_ctx->ac_remainder when C_DecryptFinal() is called.

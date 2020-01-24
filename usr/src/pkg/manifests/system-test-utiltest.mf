@@ -13,9 +13,9 @@
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright 2014, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2014 Nexenta Systems, Inc. All rights reserved.
-# Copyright 2019, Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 # Copyright 2017 Jason King.
-# Copyright 2019 Joyent, Inc.
+# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
 set name=pkg.fmri value=pkg:/system/test/utiltest@$(PKGVERS)
@@ -51,6 +51,12 @@ dir path=opt/util-tests/tests/dis/risc-v
 dir path=opt/util-tests/tests/dis/risc-v-c
 dir path=opt/util-tests/tests/dis/sparc
 dir path=opt/util-tests/tests/files
+dir path=opt/util-tests/tests/files/make_a
+dir path=opt/util-tests/tests/files/make_a/a
+dir path=opt/util-tests/tests/files/make_a/b
+dir path=opt/util-tests/tests/files/make_a/c
+dir path=opt/util-tests/tests/files/make_l
+dir path=opt/util-tests/tests/libcustr
 dir path=opt/util-tests/tests/libnvpair_json
 dir path=opt/util-tests/tests/libsff
 dir path=opt/util-tests/tests/awk
@@ -62,6 +68,7 @@ dir path=opt/util-tests/tests/awk/gnu
 dir path=opt/util-tests/tests/awk/syn
 dir path=opt/util-tests/tests/awk/tests
 dir path=opt/util-tests/tests/mergeq
+dir path=opt/util-tests/tests/sleep
 file path=opt/util-tests/README mode=0444
 file path=opt/util-tests/bin/btest mode=0555
 file path=opt/util-tests/bin/print_json mode=0555
@@ -1408,6 +1415,14 @@ file path=opt/util-tests/tests/files/gout66 mode=0444
 file path=opt/util-tests/tests/files/gout7 mode=0444
 file path=opt/util-tests/tests/files/gout8 mode=0444
 file path=opt/util-tests/tests/files/gout9 mode=0444
+file path=opt/util-tests/tests/files/make_a/Makefile mode=0444
+file path=opt/util-tests/tests/files/make_a/a/Makefile mode=0444
+file path=opt/util-tests/tests/files/make_a/a/make.rules mode=0444
+file path=opt/util-tests/tests/files/make_a/b/Makefile mode=0444
+file path=opt/util-tests/tests/files/make_a/b/make.rules mode=0444
+file path=opt/util-tests/tests/files/make_a/c/Makefile mode=0444
+file path=opt/util-tests/tests/files/make_a/c/make.rules mode=0444
+file path=opt/util-tests/tests/files/make_a/make.rules mode=0444
 file path=opt/util-tests/tests/files/test0 mode=0444
 file path=opt/util-tests/tests/files/test1 mode=0444
 file path=opt/util-tests/tests/files/test2 mode=0444
@@ -1419,6 +1434,8 @@ file path=opt/util-tests/tests/files/test7 mode=0444
 file path=opt/util-tests/tests/files/testnl mode=0444
 file path=opt/util-tests/tests/grep_test mode=0555
 file path=opt/util-tests/tests/iconv_test mode=0555
+file path=opt/util-tests/tests/libcustr/custr_remove mode=0555
+file path=opt/util-tests/tests/libcustr/custr_trunc mode=0555
 file path=opt/util-tests/tests/libjedec_test mode=0555
 file path=opt/util-tests/tests/libnvpair_json/json_00_blank mode=0555
 file path=opt/util-tests/tests/libnvpair_json/json_01_boolean mode=0555
@@ -1459,11 +1476,15 @@ file path=opt/util-tests/tests/libsff/libsff_opts.out mode=0444
 file path=opt/util-tests/tests/libsff/libsff_strings mode=0555
 file path=opt/util-tests/tests/libsff/libsff_wave mode=0555
 file path=opt/util-tests/tests/libsff/libsff_wave.out mode=0444
+file path=opt/util-tests/tests/make_test mode=0555
 file path=opt/util-tests/tests/mergeq/mqt mode=0555
 file path=opt/util-tests/tests/mergeq/wqt mode=0555
 file path=opt/util-tests/tests/printf_test mode=0555
 file path=opt/util-tests/tests/set-linkprop mode=0555
 file path=opt/util-tests/tests/show-overlay-exit mode=0555
+file path=opt/util-tests/tests/sleep/sleep.awk mode=0444
+file path=opt/util-tests/tests/sleep/sleep.d mode=0444
+file path=opt/util-tests/tests/sleep/sleeptest mode=0555
 file path=opt/util-tests/tests/smbios mode=0555
 file path=opt/util-tests/tests/vnic-mtu mode=0555
 file path=opt/util-tests/tests/xargs_test mode=0555
@@ -1472,5 +1493,6 @@ license usr/src/lib/libdemangle/THIRDPARTYLICENSE \
     license=usr/src/lib/libdemangle/THIRDPARTYLICENSE
 license usr/src/test/util-tests/tests/demangle/THIRDPARTYLICENSE.rust \
     license=usr/src/test/util-tests/tests/demangle/THIRDPARTYLICENSE.rust
+depend fmri=locale/de type=require
 depend fmri=system/library/iconv/utf-8 type=require
 depend fmri=system/test/testrunner type=require

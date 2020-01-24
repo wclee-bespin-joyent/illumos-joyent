@@ -181,7 +181,6 @@ topo_open(int version, const char *rootdir, int *errp)
 	thp->th_platform = topo_hdl_strdup(thp, platform);
 	thp->th_isa = topo_hdl_strdup(thp, isa);
 	thp->th_machine = topo_hdl_strdup(thp, uts.machine);
-	thp->th_debug |= TOPO_DBG_MOD;
 	if ((shp = smbios_open(NULL, SMB_VERSION, 0, NULL)) != NULL) {
 		if ((id = smbios_info_system(shp, &s1)) != SMB_ERR &&
 		    smbios_info_common(shp, id, &s2) != SMB_ERR) {

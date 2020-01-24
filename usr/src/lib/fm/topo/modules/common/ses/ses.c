@@ -23,7 +23,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 #include <alloca.h>
@@ -310,10 +310,9 @@ typedef struct ses_label_overrides {
 } ses_label_overrides_t;
 
 /*
- * This table covers three generations of SMCI's 4U 36-bay storage storage
- * server (and the Joyent-branded versions).  There was also an Ivy Bridge
- * variant which has been omitted due to an inability to find one to test this
- * method.
+ * This table covers three generations of SMCI's 4U 36-bay storage server
+ * (and the Joyent-branded versions).  There was also an Ivy Bridge variant
+ * which has been omitted due to an inability to find one to test on.
  */
 static const ses_label_overrides_t bay_label_overrides[] = {
 	/* Sandy Bridge variant */
@@ -1463,7 +1462,7 @@ error:
 static const char *
 lookup_bay_override(const char *product_id)
 {
-	for (uint i = 0; i < N_BAY_LBL_OVERRIDES; i++) {
+	for (uint_t i = 0; i < N_BAY_LBL_OVERRIDES; i++) {
 		if (strcmp(product_id,
 		    bay_label_overrides[i].slbl_product) == 0) {
 			return (bay_label_overrides[i].slbl_mname);
@@ -3743,8 +3742,8 @@ smci_4u36_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
     nvlist_t *in, nvlist_t **out)
 {
 	int err, ret = -1;
-	nvlist_t *pargs, *auth, *nvl = NULL, *fmri = NULL;
-	char *label, *product_id;
+	nvlist_t *pargs, *auth, *nvl = NULL, *fmri;
+	char *label = NULL, *product_id;
 
 	/*
 	 * Now look for a private argument list to determine if the invoker is
@@ -3785,6 +3784,7 @@ smci_4u36_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 	} else {
 		topo_mod_dprintf(mod, "%s: unexpected expander product id: %s",
 		    __func__, product_id);
+		(void) topo_mod_seterrno(mod, EMOD_UNKNOWN);
 		goto err;
 	}
 
@@ -3795,8 +3795,8 @@ smci_4u36_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 
 	if (topo_mod_nvalloc(mod, &nvl, NV_UNIQUE_NAME) != 0 ||
 	    nvlist_add_string(nvl, TOPO_PROP_VAL_NAME, TOPO_PROP_LABEL) != 0 ||
-	    nvlist_add_uint32(nvl, TOPO_PROP_VAL_TYPE, TOPO_TYPE_STRING) !=
-	    0 ||
+	    nvlist_add_uint32(nvl, TOPO_PROP_VAL_TYPE, TOPO_TYPE_STRING)
+	    != 0 ||
 	    nvlist_add_string(nvl, TOPO_PROP_VAL_VAL, label)
 	    != 0) {
 		topo_mod_dprintf(mod, "Failed to allocate 'out' nvlist");
@@ -3807,8 +3807,8 @@ smci_4u36_bay_label(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 	*out = nvl;
 	ret = 0;
 err:
+	free(label);
 	return (ret);
-
 }
 
 static void

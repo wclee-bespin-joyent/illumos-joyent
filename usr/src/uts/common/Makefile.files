@@ -944,7 +944,7 @@ PPPT_OBJS +=	alua_ic_if.o pppt.o pppt_msg.o pppt_tgt.o
 
 STMF_OBJS += lun_map.o stmf.o
 
-STMF_SBD_OBJS += sbd.o sbd_scsi.o sbd_pgr.o sbd_zvol.o
+STMF_SBD_OBJS += sbd.o sbd_scsi.o sbd_pgr.o sbd_zvol.o ats_copy_mgr.o
 
 SYSMSG_OBJS +=	sysmsg.o
 
@@ -1365,6 +1365,7 @@ ZFS_COMMON_OBJS +=		\
 	bplist.o		\
 	bpobj.o			\
 	bptree.o		\
+	btree.o			\
 	bqueue.o		\
 	cityhash.o		\
 	dbuf.o			\
@@ -1816,6 +1817,8 @@ USB_IA_OBJS += usb_ia.o
 
 SCSA2USB_OBJS += scsa2usb.o usb_ms_bulkonly.o usb_ms_cbi.o
 
+CCID_OBJS += ccid.o atr.o
+
 IPF_OBJS += cfw.o ip_fil_solaris.o fil.o solaris.o ip_state.o ip_frag.o \
 	    ip_nat.o ip_proxy.o ip_auth.o ip_pool.o ip_htable.o ip_lookup.o \
 	    ip_log.o misc.o ip_compat.o ip_nat6.o drand48.o
@@ -1969,9 +1972,11 @@ CH_COM_OBJS =	ch_mac.o ch_subr.o cspi.o espi.o ixf1010.o mc3.o mc4.o mc5.o \
 #	Chelsio Terminator 4 10G NIC nexus driver module
 #
 CXGBE_FW_OBJS  =	t4_fw.o t4_cfg.o t5_cfg.o t5_fw.o t6_cfg.o t6_fw.o
-CXGBE_COM_OBJS =	t4_hw.o
+CXGBE_COM_OBJS =	t4_hw.o common.o
 CXGBE_NEX_OBJS =	t4_nexus.o t4_sge.o t4_mac.o t4_ioctl.o shared.o \
-			t4_l2t.o osdep.o
+			t4_l2t.o osdep.o cudbg_lib.o cudbg_wtp.o fastlz.o \
+			fastlz_api.o cudbg_common.o cudbg_flash_utils.o \
+			cudbg.o
 
 #
 #	Chelsio Terminator 4 10G NIC driver module

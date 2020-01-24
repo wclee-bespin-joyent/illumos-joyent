@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2018 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2019 by Delphix. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright 2017 Nexenta Systems, Inc.
  * Copyright (c) 2017, 2018 Lawrence Livermore National Security, LLC.
@@ -86,21 +86,13 @@
 	(idx) == DMU_OTN_UINT64_DATA || (idx) == DMU_OTN_UINT64_METADATA ? \
 	DMU_OT_UINT64_OTHER : DMU_OT_NUMTYPES)
 
-#ifndef lint
 extern int reference_tracking_enable;
 extern boolean_t zfs_recover;
 extern uint64_t zfs_arc_max, zfs_arc_meta_limit;
 extern int zfs_vdev_async_read_max_active;
 extern int aok;
 extern boolean_t spa_load_verify_dryrun;
-#else
-int reference_tracking_enable;
-boolean_t zfs_recover;
-uint64_t zfs_arc_max, zfs_arc_meta_limit;
-int zfs_vdev_async_read_max_active;
-int aok;
-boolean_t spa_load_verify_dryrun;
-#endif
+extern int zfs_btree_verify_intensity;
 
 static const char cmdname[] = "zdb";
 uint8_t dump_opt[256];
@@ -448,7 +440,8 @@ dump_zap(objset_t *os, uint64_t object, void *data, size_t size)
 			    strcmp(attr.za_name,
 			    DSL_CRYPTO_KEY_HMAC_KEY) == 0 ||
 			    strcmp(attr.za_name, DSL_CRYPTO_KEY_IV) == 0 ||
-			    strcmp(attr.za_name, DSL_CRYPTO_KEY_MAC) == 0) {
+			    strcmp(attr.za_name, DSL_CRYPTO_KEY_MAC) == 0 ||
+			    strcmp(attr.za_name, DMU_POOL_CHECKSUM_SALT) == 0) {
 				uint8_t *u8 = prop;
 
 				for (i = 0; i < attr.za_num_integers; i++) {
@@ -895,16 +888,16 @@ dump_metaslab_stats(metaslab_t *msp)
 {
 	char maxbuf[32];
 	range_tree_t *rt = msp->ms_allocatable;
-	avl_tree_t *t = &msp->ms_allocatable_by_size;
+	zfs_btree_t *t = &msp->ms_allocatable_by_size;
 	int free_pct = range_tree_space(rt) * 100 / msp->ms_size;
 
 	/* max sure nicenum has enough space */
 	CTASSERT(sizeof (maxbuf) >= NN_NUMBUF_SZ);
 
-	zdb_nicenum(metaslab_block_maxsize(msp), maxbuf, sizeof (maxbuf));
+	zdb_nicenum(metaslab_largest_allocatable(msp), maxbuf, sizeof (maxbuf));
 
 	(void) printf("\t %25s %10lu   %7s  %6s   %4s %4d%%\n",
-	    "segments", avl_numnodes(t), "maxsize", maxbuf,
+	    "segments", zfs_btree_numnodes(t), "maxsize", maxbuf,
 	    "freepct", free_pct);
 	(void) printf("\tIn-memory histogram:\n");
 	dump_histogram(rt->rt_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
@@ -928,7 +921,7 @@ dump_metaslab(metaslab_t *msp)
 
 	if (dump_opt['m'] > 2 && !dump_opt['L']) {
 		mutex_enter(&msp->ms_lock);
-		VERIFY0(metaslab_load(msp, 0));
+		VERIFY0(metaslab_load(msp));
 		range_tree_stat_verify(msp->ms_allocatable);
 		dump_metaslab_stats(msp);
 		metaslab_unload(msp);
@@ -3387,7 +3380,7 @@ zdb_claim_removing(spa_t *spa, zdb_cb_t *zcb)
 
 	ASSERT0(range_tree_space(svr->svr_allocd_segs));
 
-	range_tree_t *allocs = range_tree_create(NULL, NULL);
+	range_tree_t *allocs = range_tree_create(NULL, RANGE_SEG64, NULL, 0, 0);
 	for (uint64_t msi = 0; msi < vd->vdev_ms_count; msi++) {
 		metaslab_t *msp = vd->vdev_ms[msi];
 
@@ -5241,7 +5234,8 @@ dump_zpool(spa_t *spa)
 	}
 
 	if (dump_opt['d'] || dump_opt['i']) {
-		mos_refd_objs = range_tree_create(NULL, NULL);
+		mos_refd_objs = range_tree_create(NULL, RANGE_SEG64, NULL, 0,
+		    0);
 		dump_dir(dp->dp_meta_objset);
 
 		if (dump_opt['d'] >= 3) {
@@ -5757,6 +5751,13 @@ main(int argc, char **argv)
 	spa_config_path_env = getenv("SPA_CONFIG_PATH");
 	if (spa_config_path_env != NULL)
 		spa_config_path = spa_config_path_env;
+
+	/*
+	 * For performance reasons, we set this tunable down. We do so before
+	 * the arg parsing section so that the user can override this value if
+	 * they choose.
+	 */
+	zfs_btree_verify_intensity = 3;
 
 	while ((c = getopt(argc, argv,
 	    "AbcCdDeEFGhiI:klLmMo:Op:PqRsSt:uU:vVx:X")) != -1) {

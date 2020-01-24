@@ -222,5 +222,5 @@ err:
 		topo_list_delete(dest, tmp);
 		topo_hdl_free(thp, tmp, elem_sz);
 	}
-	return (-1);
+	return (topo_hdl_seterrno(thp, ETOPO_NOMEM));
 }

@@ -15,6 +15,8 @@
  * along with this program; if not, see http://www.gnu.org/copyleft/gpl.txt
  */
 
+#include <string.h>
+
 #include "smatch.h"
 #include "smatch_slist.h"
 #include "smatch_extra.h"
@@ -22,6 +24,7 @@
 void show_sname_alloc(void);
 void show_data_range_alloc(void);
 void show_ptrlist_alloc(void);
+void show_rl_ptrlist_alloc(void);
 void show_sm_state_alloc(void);
 
 int local_debug;
@@ -85,7 +88,7 @@ static void match_states(const char *fn, struct expression *expr, void *info)
 	}
 
 	FOR_EACH_SM(__get_cur_stree(), sm) {
-		if (strcmp(check_name(sm->owner), check_arg->string->data) != 0)
+		if (!strstr(check_name(sm->owner), check_arg->string->data))
 			continue;
 		sm_msg("%s", show_sm(sm));
 		found = 1;
@@ -204,13 +207,16 @@ static void match_user_rl(const char *fn, struct expression *expr, void *info)
 {
 	struct expression *arg;
 	struct range_list *rl = NULL;
+	bool capped = false;
 	char *name;
 
 	arg = get_argument_from_call_expr(expr->args, 0);
 	name = expr_to_str(arg);
 
 	get_user_rl(arg, &rl);
-	sm_msg("user rl: '%s' = '%s'", name, show_rl(rl));
+	if (rl)
+		capped = user_rl_capped(arg);
+	sm_msg("user rl: '%s' = '%s'%s", name, show_rl(rl), capped ? " (capped)" : "");
 
 	free_string(name);
 }
@@ -510,6 +516,16 @@ static void match_local_debug_off(const char *fn, struct expression *expr, void 
 	local_debug = 0;
 }
 
+static void match_debug_db_on(const char *fn, struct expression *expr, void *info)
+{
+	debug_db = 1;
+}
+
+static void match_debug_db_off(const char *fn, struct expression *expr, void *info)
+{
+	debug_db = 0;
+}
+
 static void match_about(const char *fn, struct expression *expr, void *info)
 {
 	struct expression *arg;
@@ -687,6 +703,8 @@ static void match_state_count(const char *fn, struct expression *expr, void *inf
 static void match_mem(const char *fn, struct expression *expr, void *info)
 {
 	show_sname_alloc();
+	show_data_range_alloc();
+	show_rl_ptrlist_alloc();
 	show_ptrlist_alloc();
 	sm_msg("%lu pools", get_pool_count());
 	sm_msg("%d strees", unfree_stree);
@@ -767,6 +785,8 @@ void check_debug(int id)
 	add_function_hook("__smatch_debug_off", &match_debug_off, NULL);
 	add_function_hook("__smatch_local_debug_on", &match_local_debug_on, NULL);
 	add_function_hook("__smatch_local_debug_off", &match_local_debug_off, NULL);
+	add_function_hook("__smatch_debug_db_on", &match_debug_db_on, NULL);
+	add_function_hook("__smatch_debug_db_off", &match_debug_db_off, NULL);
 	add_function_hook("__smatch_intersection", &match_intersection, NULL);
 	add_function_hook("__smatch_type", &match_type, NULL);
 	add_implied_return_hook("__smatch_type_rl_helper", &match_type_rl_return, NULL);

@@ -64,6 +64,7 @@ static const uuid_t gpt_uuid_illumos_boot = GPT_ENT_TYPE_ILLUMOS_BOOT;
 static const uuid_t gpt_uuid_illumos_ufs = GPT_ENT_TYPE_ILLUMOS_UFS;
 static const uuid_t gpt_uuid_illumos_zfs = GPT_ENT_TYPE_ILLUMOS_ZFS;
 static const uuid_t gpt_uuid_reserved = GPT_ENT_TYPE_RESERVED;
+static const uuid_t gpt_uuid_apple_apfs = GPT_ENT_TYPE_APPLE_APFS;
 #endif
 
 struct pentry {
@@ -114,7 +115,8 @@ static struct parttypes {
 	{ PART_VTOC_USR,	"usr" },
 	{ PART_VTOC_STAND,	"stand" },
 	{ PART_VTOC_VAR,	"var" },
-	{ PART_VTOC_HOME,	"home" }
+	{ PART_VTOC_HOME,	"home" },
+	{ PART_APFS,		"APFS" }
 };
 
 const char *
@@ -168,6 +170,8 @@ gpt_parttype(uuid_t type)
 		return (PART_ILLUMOS_ZFS);
 	else if (uuid_equal(&type, &gpt_uuid_reserved, NULL))
 		return (PART_RESERVED);
+	else if (uuid_equal(&type, &gpt_uuid_apple_apfs, NULL))
+		return (PART_APFS);
 	return (PART_UNKNOWN);
 }
 
@@ -758,7 +762,7 @@ ptable_open(void *dev, uint64_t sectors, uint16_t sectorsize, diskread_t *dread)
 	struct dos_partition *dp;
 	struct ptable *table;
 	uint8_t *buf;
-	int i, count;
+	int i;
 #ifdef LOADER_MBR_SUPPORT
 	struct pentry *entry;
 	uint32_t start, end;
@@ -826,28 +830,23 @@ ptable_open(void *dev, uint64_t sectors, uint16_t sectorsize, diskread_t *dread)
 	}
 	/* Check that we have PMBR. Also do some validation. */
 	dp = (struct dos_partition *)(buf + DOSPARTOFF);
-	for (i = 0, count = 0; i < NDOSPART; i++) {
+	/*
+	 * macOS can create PMBR partition in a hybrid MBR; that is, an MBR
+	 * partition which has a DOSTYP_PMBR entry defined to start at sector 1.
+	 * After the DOSTYP_PMBR, there may be other paritions. A UEFI
+	 * compliant PMBR has no other partitions.
+	 */
+	for (i = 0; i < NDOSPART; i++) {
 		if (dp[i].dp_flag != 0 && dp[i].dp_flag != 0x80) {
 			DPRINTF("invalid partition flag %x", dp[i].dp_flag);
 			goto out;
 		}
 #ifdef LOADER_GPT_SUPPORT
-		if (dp[i].dp_typ == DOSPTYP_PMBR) {
+		if (dp[i].dp_typ == DOSPTYP_PMBR && dp[i].dp_start == 1) {
 			table->type = PTABLE_GPT;
 			DPRINTF("PMBR detected");
 		}
 #endif
-		if (dp[i].dp_typ != 0)
-			count++;
-	}
-	/* Do we have some invalid values? */
-	if (table->type == PTABLE_GPT && count > 1) {
-		if (dp[1].dp_typ != DOSPTYP_HFS) {
-			table->type = PTABLE_NONE;
-			DPRINTF("Incorrect PMBR, ignore it");
-		} else {
-			DPRINTF("Bootcamp detected");
-		}
 	}
 #ifdef LOADER_GPT_SUPPORT
 	if (table->type == PTABLE_GPT) {
