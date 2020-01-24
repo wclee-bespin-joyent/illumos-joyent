@@ -54,7 +54,7 @@ configure_ipfilter()
         #
 	# Nothing to do if:
 	# - service's policy is 'use_global'
-        # - ipfilter isn't online 
+        # - ipfilter isn't online
 	# - global policy is 'custom'
         #
 	[ "`get_policy $SMF_FMRI`" = "use_global" ] && return 0
