@@ -514,6 +514,7 @@ DRV_KMODS	+= ses
 #
 #	USB specific modules
 #
+DRV_KMODS	+= ccid
 DRV_KMODS	+= hid
 DRV_KMODS	+= hubd
 DRV_KMODS	+= uhci
@@ -792,3 +793,4 @@ LINTFLAGS	+= -D_MACHDEP -I$(UTSBASE)/i86pc
 DRV_KMODS	+= amdf17nbdf
 DRV_KMODS	+= coretemp
 DRV_KMODS	+= pchtemp
+DRV_KMODS	+= amdnbtemp
