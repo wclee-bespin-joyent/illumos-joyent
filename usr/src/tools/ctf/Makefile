@@ -66,6 +66,6 @@ CTFTOOLS_FILES = \
 	lib/i386/libelf.so.1 \
 
 ctftools: install
-	cd $(ROOTONBLD) && $(TAR) cvzf $(TARBALL) $(CTFTOOLS_FILES)
+	cd $(ROOTONBLD) && $(TAR) cvzf $(CTFTOOLS_TARBALL) $(CTFTOOLS_FILES)
 
 FRC:
