@@ -65,6 +65,7 @@ CTFTOOLS_FILES = \
 	lib/i386/libelf.so \
 	lib/i386/libelf.so.1
 
+# CTFTOOLS_TARBALL should be set in the environment
 ctftools: install
 	cd $(ROOTONBLD) && $(TAR) cvzf $(CTFTOOLS_TARBALL) $(CTFTOOLS_FILES)
 
