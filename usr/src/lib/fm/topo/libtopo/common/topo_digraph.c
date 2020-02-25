@@ -10,19 +10,51 @@
  */
 
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 /*
- * XXX add comment
+ * path scheme FMRIs
+ * -----------------
+ * For digraph topologies it is useful to be able to treat paths between
+ * vertices as resources and thus have a way to represent a unique path
+ * between those vertices.  The path FMRI scheme is used for this purpose and
+ * has the following form:
+ *
+ * path://scheme=<scheme>/<nodename>=<instance>/...
+ *
+ * For example, the path FMRI to represent a path between an initiator and a
+ * target in the SAS scheme digraph might look like this:
+ *
+ * path://scheme=sas/initiator=5003048023567a00/port=5003048023567a00/
+ *       port=500304801861347f/expander=500304801861347f/port=500304801861347f/
+ *       port=5000c500adc881d5/target=5000c500adc881d4
  */
 
 #include <libtopo.h>
 #include <sys/fm/protocol.h>
 
 #include <topo_digraph.h>
+#include <topo_method.h>
+
 #define	__STDC_FORMAT_MACROS
 #include <inttypes.h>
+
+
+extern int path_fmri_str2nvl(topo_mod_t *, tnode_t *, topo_version_t,
+    nvlist_t *, nvlist_t **);
+extern int path_fmri_nvl2str(topo_mod_t *, tnode_t *, topo_version_t,
+    nvlist_t *, nvlist_t **);
+
+static const topo_method_t digraph_root_methods[] = {
+	{ TOPO_METH_PATH_STR2NVL, TOPO_METH_STR2NVL_DESC,
+	    TOPO_METH_STR2NVL_VERSION, TOPO_STABILITY_INTERNAL,
+	    path_fmri_str2nvl },
+	{ TOPO_METH_PATH_NVL2STR, TOPO_METH_NVL2STR_DESC,
+	    TOPO_METH_NVL2STR_VERSION, TOPO_STABILITY_INTERNAL,
+	    path_fmri_nvl2str },
+	{ NULL }
+};
 
 topo_digraph_t *
 topo_digraph_get(topo_hdl_t *thp, const char *scheme)
@@ -80,6 +112,12 @@ topo_digraph_new(topo_hdl_t *thp, topo_mod_t *mod, const char *scheme)
 	topo_node_hold(tn);
 
 	tdg->tdg_rootnode = tn;
+	if (topo_method_register(mod, tn, digraph_root_methods) != 0) {
+		topo_mod_dprintf(mod, "failed to register digraph root "
+		    "methods");
+		/* errno set */
+		return (NULL);
+	}
 
 	(void) pthread_mutex_init(&tdg->tdg_lock, NULL);
 
@@ -393,7 +431,7 @@ err:
 
 /*
  * On success, populates the "paths" parameter with an array of
- * topo_saspath_t structs representing all paths from the "from" vertex to the
+ * topo_path_t structs representing all paths from the "from" vertex to the
  * "to" vertex.  The caller is responsible for freeing this array.  Also, on
  * success, returns the the number of paths found.  If no paths are found, 0
  * is returned.
@@ -412,8 +450,8 @@ topo_digraph_paths(topo_hdl_t *thp, topo_digraph_t *tdg, topo_vertex_t *from,
 	uint_t i, npaths = 0;
 	int ret;
 
-	ret = asprintf(&curr_path, "sas://%s=%s/%s=%" PRIx64"",
-	    FM_FMRI_SAS_TYPE, FM_FMRI_SAS_TYPE_PATH,
+	ret = asprintf(&curr_path, "%s://%s=%s/%s=%" PRIx64"",
+	    FM_FMRI_SCHEME_PATH, FM_FMRI_SCHEME, tdg->tdg_scheme,
 	    topo_node_name(from->tvt_node),
 	    topo_node_instance(from->tvt_node));
 
@@ -481,5 +519,290 @@ err:
 
 	topo_dprintf(thp, TOPO_DBG_ERR, "%s: failed (%s)", __func__,
 	    topo_hdl_errmsg(thp));
+	return (-1);
+}
+
+static ssize_t
+fmri_bufsz(nvlist_t *nvl)
+{
+	char *dg_scheme = NULL;
+	nvlist_t **hops, *auth;
+	uint_t nhops;
+	ssize_t bufsz = 0;
+
+	if (nvlist_lookup_nvlist(nvl, FM_FMRI_AUTHORITY, &auth) != 0 ||
+	    nvlist_lookup_string(auth, FM_FMRI_PATH_DIGRAPH_SCHEME,
+	    &dg_scheme) != 0) {
+		return (0);
+	}
+
+	bufsz += snprintf(NULL, 0, "%s://%s=%s", FM_FMRI_SCHEME_PATH,
+	    FM_FMRI_SCHEME, dg_scheme);
+
+	if (nvlist_lookup_nvlist_array(nvl, FM_FMRI_PATH, &hops, &nhops) !=
+	    0) {
+		return (0);
+	}
+
+	for (uint_t i = 0; i < nhops; i++) {
+		char *name;
+		uint64_t inst;
+
+		if (nvlist_lookup_string(hops[i], FM_FMRI_PATH_NAME, &name) !=
+		    0||
+		    nvlist_lookup_uint64(hops[i], FM_FMRI_PATH_INST, &inst) !=
+		    0) {
+			return (0);
+		}
+		bufsz += snprintf(NULL, 0, "/%s=%" PRIx64 "", name, inst);
+	}
+	return (bufsz + 1);
+}
+
+int
+path_fmri_nvl2str(topo_mod_t *mod, tnode_t *node, topo_version_t version,
+    nvlist_t *in, nvlist_t **out)
+{
+	uint8_t scheme_vers;
+	nvlist_t *outnvl;
+	nvlist_t **paths, *auth;
+	uint_t nelem;
+	ssize_t bufsz, end = 0;
+	char *buf, *dg_scheme;
+
+	if (version > TOPO_METH_NVL2STR_VERSION)
+		return (topo_mod_seterrno(mod, EMOD_VER_NEW));
+
+	if (nvlist_lookup_uint8(in, FM_FMRI_SAS_VERSION, &scheme_vers) != 0 ||
+	    scheme_vers != FM_SAS_SCHEME_VERSION) {
+		return (topo_mod_seterrno(mod, EMOD_FMRI_NVL));
+	}
+
+	/*
+	 * Get size of buffer needed to hold the string representation of the
+	 * FMRI.
+	 */
+	if ((bufsz = fmri_bufsz(in)) == 0) {
+		return (topo_mod_seterrno(mod, EMOD_FMRI_MALFORM));
+	}
+
+	if ((buf = topo_mod_zalloc(mod, bufsz)) == NULL) {
+		return (topo_mod_seterrno(mod, EMOD_NOMEM));
+	}
+
+	/*
+	 * We've already successfully done these nvlist lookups in fmri_bufsz()
+	 * so we don't worry about checking retvals this time around.
+	 */
+	(void) nvlist_lookup_nvlist(in, FM_FMRI_AUTHORITY, &auth);
+	(void) nvlist_lookup_string(auth, FM_FMRI_PATH_DIGRAPH_SCHEME,
+	    &dg_scheme);
+	(void) nvlist_lookup_nvlist_array(in, FM_FMRI_PATH, &paths,
+	    &nelem);
+	end += snprintf(buf, bufsz, "%s://%s=%s", FM_FMRI_SCHEME_PATH,
+	    FM_FMRI_SCHEME, dg_scheme);
+
+	for (uint_t i = 0; i < nelem; i++) {
+		char *pathname;
+		uint64_t pathinst;
+
+		(void) nvlist_lookup_string(paths[i], FM_FMRI_PATH_NAME,
+		    &pathname);
+		(void) nvlist_lookup_uint64(paths[i], FM_FMRI_PATH_INST,
+		    &pathinst);
+		end += snprintf(buf + end, (bufsz - end), "/%s=%" PRIx64 "",
+		    pathname, pathinst);
+	}
+
+	if (topo_mod_nvalloc(mod, &outnvl, NV_UNIQUE_NAME) != 0) {
+		topo_mod_free(mod, buf, bufsz);
+		return (topo_mod_seterrno(mod, EMOD_FMRI_NVL));
+	}
+	if (nvlist_add_string(outnvl, "fmri-string", buf) != 0) {
+		nvlist_free(outnvl);
+		topo_mod_free(mod, buf, bufsz);
+		return (topo_mod_seterrno(mod, EMOD_FMRI_NVL));
+	}
+	topo_mod_free(mod, buf, bufsz);
+	*out = outnvl;
+
+	return (0);
+}
+
+int
+path_fmri_str2nvl(topo_mod_t *mod, tnode_t *node, topo_version_t version,
+    nvlist_t *in, nvlist_t **out)
+{
+	char *fmristr, *tmp = NULL, *lastpair;
+	char *dg_scheme, *dg_scheme_end, *pathname, *path_start;
+	nvlist_t *fmri = NULL, *auth = NULL, **path = NULL;
+	uint_t npairs = 0, i = 0, fmrilen, path_offset;
+
+	if (version > TOPO_METH_STR2NVL_VERSION)
+		return (topo_mod_seterrno(mod, EMOD_VER_NEW));
+
+	if (nvlist_lookup_string(in, "fmri-string", &fmristr) != 0)
+		return (topo_mod_seterrno(mod, EMOD_METHOD_INVAL));
+
+	if (strncmp(fmristr, "path://", 7) != 0)
+		return (topo_mod_seterrno(mod, EMOD_FMRI_MALFORM));
+
+	if (topo_mod_nvalloc(mod, &fmri, NV_UNIQUE_NAME) != 0) {
+		/* errno set */
+		return (-1);
+	}
+	if (nvlist_add_string(fmri, FM_FMRI_SCHEME,
+	    FM_FMRI_SCHEME_PATH) != 0 ||
+	    nvlist_add_uint8(fmri, FM_FMRI_PATH_VERSION,
+	    FM_PATH_SCHEME_VERSION) != 0) {
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+
+	/*
+	 * We need to make a copy of the fmri string because strtok will
+	 * modify it.  We can't use topo_mod_strdup/strfree because
+	 * topo_mod_strfree will end up leaking part of the string because
+	 * of the NUL chars that strtok inserts - which will cause
+	 * topo_mod_strfree to miscalculate the length of the string.  So we
+	 * keep track of the length of the original string and use
+	 * topo_mod_zalloc/topo_mod_free.
+	 */
+	fmrilen = strlen(fmristr);
+	if ((tmp = topo_mod_zalloc(mod, fmrilen + 1)) == NULL) {
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+	(void) strncpy(tmp, fmristr, fmrilen);
+
+	/*
+	 * Find the offset of the "/" after the authority portion of the FMRI.
+	 */
+	if ((path_start = strchr(tmp + 7, '/')) == NULL) {
+		(void) topo_mod_seterrno(mod, EMOD_FMRI_MALFORM);
+		goto err;
+	}
+
+	path_offset = path_start - tmp;
+	pathname = fmristr + path_offset + 1;
+
+	/*
+	 * Count the number of "=" chars after the "path:///" portion of the
+	 * FMRI to determine how big the path array needs to be.
+	 */
+	(void) strtok_r(tmp + path_offset, "=", &lastpair);
+	while (strtok_r(NULL, "=", &lastpair) != NULL)
+		npairs++;
+
+	if ((path = topo_mod_zalloc(mod, npairs * sizeof (nvlist_t *))) ==
+	    NULL) {
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+
+	/*
+	 * Build the auth nvlist.  There is only one nvpair in the path FMRI
+	 * scheme, which is the scheme of the underlying digraph.
+	 */
+	if (topo_mod_nvalloc(mod, &auth, NV_UNIQUE_NAME) != 0) {
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+
+	if ((dg_scheme = strchr(tmp + 7, '=')) == NULL ||
+	    dg_scheme > path_start) {
+		(void) topo_mod_seterrno(mod, EMOD_FMRI_MALFORM);
+		goto err;
+	}
+	dg_scheme_end = tmp + path_offset;
+	*dg_scheme_end = '\0';
+
+	if (nvlist_add_string(auth, FM_FMRI_PATH_DIGRAPH_SCHEME, dg_scheme) !=
+	    0 ||
+	    nvlist_add_nvlist(fmri, FM_FMRI_AUTHORITY, auth) != 0) {
+
+	}
+
+	while (i < npairs) {
+		nvlist_t *pathcomp;
+		uint64_t pathinst;
+		char *end, *addrstr, *estr;
+
+		if (topo_mod_nvalloc(mod, &pathcomp, NV_UNIQUE_NAME) != 0) {
+			(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+			goto err;
+		}
+		if ((end = strchr(pathname, '=')) == NULL) {
+			(void) topo_mod_seterrno(mod, EMOD_FMRI_MALFORM);
+			goto err;
+		}
+		*end = '\0';
+		addrstr = end + 1;
+
+		/*
+		 * If this is the last pair, then addrstr will already be
+		 * nul-terminated.
+		 */
+		if (i < (npairs - 1)) {
+			if ((end = strchr(addrstr, '/')) == NULL) {
+				(void) topo_mod_seterrno(mod,
+				    EMOD_FMRI_MALFORM);
+				goto err;
+			}
+			*end = '\0';
+		}
+
+		/*
+		 * Convert addrstr to a uint64_t
+		 */
+		errno = 0;
+		pathinst = strtoull(addrstr, &estr, 16);
+		if (errno != 0 || *estr != '\0') {
+			(void) topo_mod_seterrno(mod, EMOD_FMRI_MALFORM);
+			goto err;
+		}
+
+		/*
+		 * Add both nvpairs to the nvlist and then add the nvlist to
+		 * the path nvlist array.
+		 */
+		if (nvlist_add_string(pathcomp, FM_FMRI_PATH_NAME, pathname) !=
+		    0 ||
+		    nvlist_add_uint64(pathcomp, FM_FMRI_PATH_INST, pathinst) !=
+		    0) {
+			(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+			goto err;
+		}
+		path[i++] = pathcomp;
+		pathname = end + 1;
+	}
+	if (nvlist_add_nvlist_array(fmri, FM_FMRI_PATH, path, npairs) != 0) {
+		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
+		goto err;
+	}
+	*out = fmri;
+
+	if (path != NULL) {
+		for (i = 0; i < npairs; i++)
+			nvlist_free(path[i]);
+
+		topo_mod_free(mod, path, npairs * sizeof (nvlist_t *));
+	}
+	nvlist_free(auth);
+	topo_mod_free(mod, tmp, fmrilen + 1);
+	return (0);
+
+err:
+	topo_mod_dprintf(mod, "%s failed: %s", __func__,
+	    topo_strerror(topo_mod_errno(mod)));
+	if (path != NULL) {
+		for (i = 0; i < npairs; i++)
+			nvlist_free(path[i]);
+
+		topo_mod_free(mod, path, npairs * sizeof (nvlist_t *));
+	}
+	nvlist_free(auth);
+	nvlist_free(fmri);
+	topo_mod_free(mod, tmp, fmrilen + 1);
 	return (-1);
 }

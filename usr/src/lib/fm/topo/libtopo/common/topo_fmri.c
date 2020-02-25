@@ -24,7 +24,7 @@
  * Use is subject to license terms.
  */
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 #include <ctype.h>
@@ -135,16 +135,41 @@ int
 topo_fmri_str2nvl(topo_hdl_t *thp, const char *fmristr, nvlist_t **fmri,
     int *err)
 {
-	char *f, buf[PATH_MAX];
+	char *f, buf[PATH_MAX], *method = TOPO_METH_STR2NVL;
 	nvlist_t *out = NULL, *in = NULL;
 	tnode_t *rnode;
 
-	(void) strlcpy(buf, fmristr, sizeof (buf));
-	if ((f = strchr(buf, ':')) == NULL)
-		return (set_error(thp, ETOPO_FMRI_MALFORM, err,
-		    TOPO_METH_STR2NVL, in));
+	/*
+	 * For path FMRI's the scheme is encoded in the authority portion of
+	 * the FMRI - e.g.
+	 * 
+	 * path://scheme=<scheme>/...
+	 */
+	if (strncmp(fmristr, "path://", 7) == 0) {
+		char *scheme_start, *scheme_end;
 
-	*f = '\0'; /* strip trailing FMRI path */
+		method = TOPO_METH_PATH_STR2NVL;
+
+		if ((scheme_start = strchr(fmristr, '=')) == NULL) {
+			return (set_error(thp, ETOPO_FMRI_MALFORM, err,
+			    TOPO_METH_STR2NVL, in));
+		}
+		scheme_start++;
+		if ((scheme_end = strchr(scheme_start, '/')) == NULL) {
+			return (set_error(thp, ETOPO_FMRI_MALFORM, err,
+			    TOPO_METH_STR2NVL, in));
+		}
+		(void) strlcpy(buf, scheme_start,
+		    (scheme_end - scheme_start) + 1);
+	} else {
+		(void) strlcpy(buf, fmristr, sizeof (buf));
+
+		if ((f = strchr(buf, ':')) == NULL)
+			return (set_error(thp, ETOPO_FMRI_MALFORM, err,
+			    TOPO_METH_STR2NVL, in));
+
+		*f = '\0'; /* strip trailing FMRI path */
+	}
 
 	if ((rnode = topo_hdl_root(thp, buf)) == NULL)
 		return (set_error(thp, ETOPO_METHOD_NOTSUP, err,
@@ -158,8 +183,8 @@ topo_fmri_str2nvl(topo_hdl_t *thp, const char *fmristr, nvlist_t **fmri,
 		return (set_error(thp, ETOPO_FMRI_NVL, err, TOPO_METH_STR2NVL,
 		    in));
 
-	if (topo_method_invoke(rnode, TOPO_METH_STR2NVL,
-	    TOPO_METH_STR2NVL_VERSION, in, &out, err) != 0)
+	if (topo_method_invoke(rnode, method, TOPO_METH_STR2NVL_VERSION, in,
+	    &out, err) != 0)
 		return (set_error(thp, *err, err, TOPO_METH_STR2NVL, in));
 
 	nvlist_free(in);

@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 /*
@@ -66,10 +66,6 @@
  *   - speed-in-rpm
  *   - hc-fmri
  *
- * XXX - It'd be really cool if we could check for a ZFS pool config and
- * try to match the target to a leaf vdev and include the zfs-scheme FMRI of
- * that vdev as a property on this node.
- *
  * expander
  * --------
  * An expander acts as both a port multiplexer and expander routing signals
@@ -82,55 +78,8 @@
  *
  * Version 0 sas FMRI scheme
  * -------------------------
- * Two types of resources can be represented in the sas FMRI scheme: paths
- * and pathnodes.  The "type" field in the authority portion of the FMRI
- * denotes whether the FMRI indentifies a pathnode or path:
- *
- * e.g.
- * sas://type=path/....
- * sas://type=pathnode/....
- *
- * Path
- * ----
- * The first resource type is a path, which represents a unique path from a
- * given initiator to a given target.  Hence, the first two node/instance pairs
- * are always an initiator and port and the last two pairs are always a port
- * and a target. In between there may be one or two sets of expander and port
- * pairs.
- *
- * e.g.
- * sas://<auth>/initiator=<inst>/<port>=<inst>/.../port=<inst>/target=<inst>
- *
- * Node instance numbers are based on the local SAS address of the underlying
- * component.  Each initiator, expander and target will have a unique[1] SAS
- * address.  And each port from an initiator or to a target will also have a
- * unique SAS address.  Note that expander ports are not individually
- * addressed, thus the instance number shall be the SAS address of the
- * expander, itself.
- *
- * [1] The SAS address will be unique within a given SAS fabric (domain)
- *
- * The nvlist representation of the FMRI consists of two nvpairs:
- *
- * name               type                   value
- * ----               ----                   -----
- * sas-fmri-version   DATA_TYPE_UINT8        0
- * sas-path           DATA_TYPE_NVLIST_ARRAY see below
- *
- * sas-path is an array of nvlists where each nvlist contains the following
- * nvpairs:
- *
- * name               type                   value
- * ----               ----                   -----
- * sas-name           DATA_TYPE_STRING       (initiator|port|expander|target)
- * sas-id             DATA_TYPE_UINT64       SAS address (see above)
- *
- *
- * Pathnode
- * --------
- * The second resource type in the sas FMRI scheme is a pathnode, which
- * represents a single node in the underlying graph topology.  In this form,
- * the FMRI consists of a single sas-name/sas-id pair.  In order to
+ * An FMRI in the sas scheme represents a single node in the underlying graph
+ * topology.  The FMRI consists of a single sas-name/sas-id pair.  In order to
  * differentiate the FMRIs for expander "port" nodes, which will share the same
  * SAS address as the expander, the range of PHYs associated with the port will
  * be added to the authority portion of the FMRI.  For expander ports that
@@ -139,15 +88,15 @@
  *
  * e.g.
  *
- * sas://type=pathnode:start-phy=0:end-phy=0/port=500304801861347f
- * sas://type=pathnode:start-phy=1:end-phy=1/port=500304801861347f
+ * sas://start-phy=0:end-phy=0/port=500304801861347f
+ * sas://start-phy=1:end-phy=1/port=500304801861347f
  *
  * For expander ports that connect to another expander, this will be a wide
  * port that will span a range of phys (typically 4 or 8 wide)
  *
  * e.g.
  *
- * sas://type=pathnode:start_phy=0:end_phy=7/port=500304801861347f
+ * sas://start_phy=0:end_phy=7/port=500304801861347f
  *
  * Overview of SAS Topology Generation
  * -----------------------------------
@@ -563,9 +512,7 @@ sas_create_vertex(topo_mod_t *mod, const char *name, topo_instance_t inst,
 	}
 	tn = topo_vertex_node(vtx);
 
-	if (topo_mod_nvalloc(mod, &auth, NV_UNIQUE_NAME) != 0 ||
-	    nvlist_add_string(auth, FM_FMRI_SAS_TYPE,
-	    FM_FMRI_SAS_TYPE_PATHNODE) != 0) {
+	if (topo_mod_nvalloc(mod, &auth, NV_UNIQUE_NAME) != 0) {
 		(void) topo_mod_seterrno(mod, EMOD_NOMEM);
 		goto err;
 	}
