@@ -24,7 +24,7 @@
  * path://scheme=<scheme>/<nodename>=<instance>/...
  *
  * For example, the path FMRI to represent a path between an initiator and a
- * target in the SAS scheme digraph might look like this:
+ * target in a SAS scheme digraph might look like this:
  *
  * path://scheme=sas/initiator=5003048023567a00/port=5003048023567a00/
  *       port=500304801861347f/expander=500304801861347f/port=500304801861347f/
@@ -573,8 +573,8 @@ path_fmri_nvl2str(topo_mod_t *mod, tnode_t *node, topo_version_t version,
 	if (version > TOPO_METH_NVL2STR_VERSION)
 		return (topo_mod_seterrno(mod, EMOD_VER_NEW));
 
-	if (nvlist_lookup_uint8(in, FM_FMRI_SAS_VERSION, &scheme_vers) != 0 ||
-	    scheme_vers != FM_SAS_SCHEME_VERSION) {
+	if (nvlist_lookup_uint8(in, FM_FMRI_PATH_VERSION, &scheme_vers) != 0 ||
+	    scheme_vers != FM_PATH_SCHEME_VERSION) {
 		return (topo_mod_seterrno(mod, EMOD_FMRI_NVL));
 	}
 
