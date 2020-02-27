@@ -1193,13 +1193,7 @@ vm_gpa_release(void *cookie)
 {
 	vm_page_t m = cookie;
 
-#ifdef __FreeBSD__
 	vm_page_unwire(m, PQ_ACTIVE);
-#else
-	vm_page_lock(m);
-	vm_page_unhold(m);
-	vm_page_unlock(m);
-#endif
 }
 
 int

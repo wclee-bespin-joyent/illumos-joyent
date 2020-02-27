@@ -95,8 +95,6 @@ __FBSDID("$FreeBSD$");
 static void vlapic_set_error(struct vlapic *, uint32_t, bool);
 static void vlapic_tmr_reset(struct vlapic *);
 
-static void vlapic_set_error(struct vlapic *, uint32_t, bool);
-
 static __inline uint32_t
 vlapic_get_id(struct vlapic *vlapic)
 {

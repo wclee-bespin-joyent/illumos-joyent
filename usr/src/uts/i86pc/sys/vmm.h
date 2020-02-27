@@ -127,6 +127,14 @@ enum x2apic_state {
 #define	VM_INTINFO_HWEXCEPTION	(3 << 8)
 #define	VM_INTINFO_SWINTR	(4 << 8)
 
+#ifndef __FreeBSD__
+/*
+ * illumos doesn't have a limitation based on SPECNAMELEN like FreeBSD does.
+ * Instead of picking an arbitrary value we will just rely on the same
+ * calculation that's made below. If this calculation ever changes we need to
+ * update the the VM_MAX_NAMELEN mapping in the bhyve brand's boot.c file.
+ */
+#else
 /*
  * The VM name has to fit into the pathname length constraints of devfs,
  * governed primarily by SPECNAMELEN.  The length is the total number of
@@ -143,6 +151,7 @@ enum x2apic_state {
  * bytes for FreeBSD 12.  A minimum length is set for safety and supports
  * a SPECNAMELEN as small as 32 on old systems.
  */
+#endif
 #define VM_MAX_PREFIXLEN 10
 #define VM_MAX_SUFFIXLEN 15
 #define VM_MIN_NAMELEN   6
