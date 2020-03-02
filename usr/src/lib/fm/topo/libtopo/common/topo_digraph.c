@@ -14,6 +14,39 @@
  */
 
 /*
+ * This file implements a set of APIs for creating, destroying and traversing
+ * directed-graph (digraph) topologies.  The API is split into categories:
+ * client API and module API.
+ *
+ * The client API can be used by libtopo consumers for traversing an existing
+ * digraph topology.  The module API is can be used by topo plugins to create
+ * or destroy a digraph topology.
+ *
+ * client API
+ * ----------
+ * topo_digraph_get
+ * topo_vertex_iter
+ * topo_vertex_node
+ * topo_edge_iter
+ * topo_digraph_paths
+ * topo_path_destroy
+ *
+ * module API
+ * ----------
+ * topo_digraph_new
+ * topo_digraph_destroy
+ * topo_vertex_new
+ * topo_vertex_destroy
+ * topo_edge_new
+ *
+ * A digraph is represented in-core by a topo_digraph_t structure which
+ * maintains an adjacency list of vertices (see topo_digraph.h).  Vertices
+ * are represented by topo_vertex_t structures which are essentially thin
+ * wrappers around topo node (tnode_t) structures.  In addition to holding
+ * a pointer to the underlyng topo node, the topo_vertex_t maintains a list
+ * of incoming and outgoing edges and a pointer to the next and previous
+ * vertices in digraph's adjecently list.
+ *
  * path scheme FMRIs
  * -----------------
  * For digraph topologies it is useful to be able to treat paths between
@@ -29,6 +62,8 @@
  * path://scheme=sas/initiator=5003048023567a00/port=5003048023567a00/
  *       port=500304801861347f/expander=500304801861347f/port=500304801861347f/
  *       port=5000c500adc881d5/target=5000c500adc881d4
+ *
+ * This file implements NVL2STR and STR2NVL methods for path-scheme FMRIs.
  */
 
 #include <libtopo.h>
@@ -56,6 +91,10 @@ static const topo_method_t digraph_root_methods[] = {
 	{ NULL }
 };
 
+/*
+ * On success, returns a pointer to the digraph for the specified FMRI scheme.
+ * On failure, returns NULL.
+ */
 topo_digraph_t *
 topo_digraph_get(topo_hdl_t *thp, const char *scheme)
 {
@@ -75,6 +114,13 @@ find_digraph(topo_mod_t *mod)
 	return (topo_digraph_get(mod->tm_hdl, mod->tm_info->tmi_scheme));
 }
 
+/*
+ * On successs, qllocates a new topo_digraph_t structure for the requested
+ * scheme.  The caller is responsible for free all memory allocated for this
+ * structure when done via a call to topo_digraph_destroy().
+ *
+ * On failure, this function returns NULL and sets topo errno.
+ */
 topo_digraph_t *
 topo_digraph_new(topo_hdl_t *thp, topo_mod_t *mod, const char *scheme)
 {
@@ -127,6 +173,10 @@ err:
 	return (NULL);
 }
 
+/*
+ * Deallocates all memory associated with the specified topo_digraph_t.
+ * This function is a NOP if NULL is passed in.
+ */
 void
 topo_digraph_destroy(topo_digraph_t *tdg)
 {
@@ -142,6 +192,19 @@ topo_digraph_destroy(topo_digraph_t *tdg)
 	topo_mod_free(mod, tdg, sizeof (topo_digraph_t));
 }
 
+/*
+ * This function creates a new vertex and adds it to the digraph associated
+ * with the module.
+ *
+ * name: name of the vertex
+ * instance: instance number of the vertex
+ *
+ * On success, it returns a pointer to the allocated topo_vertex_t associated
+ * with the new vertex.  The caller is responsible for free-ing this structure
+ * via a call to topo_vertex_destroy().
+ *
+ * On failures, this function returns NULL and sets topo_mod_errno.
+ */
 topo_vertex_t *
 topo_vertex_new(topo_mod_t *mod, const char *name, topo_instance_t inst)
 {
@@ -192,6 +255,9 @@ err:
 	return (NULL);
 }
 
+/*
+ * Returns the underlying tnode_t structure for the specified vertex.
+ */
 tnode_t *
 topo_vertex_node(topo_vertex_t *vtx)
 {
@@ -227,6 +293,16 @@ topo_vertex_destroy(topo_mod_t *mod, topo_vertex_t *vtx)
 	topo_mod_free(mod, vtx, sizeof (topo_vertex_t));
 }
 
+/*
+ * This function can be used to iterate over all of the vertices in the
+ * specified digraph.  The specified callback function is invoked for each
+ * vertices.  Callback function should return the standard topo walker
+ * (TOPO_WALK_*) return values.
+ *
+ * On success, this function returns 0.
+ *
+ * On failure this function returns -1.
+ */
 int
 topo_vertex_iter(topo_hdl_t *thp, topo_digraph_t *tdg,
     int (*func)(topo_hdl_t *, topo_vertex_t *, boolean_t, void *), void *arg)
@@ -258,6 +334,13 @@ out:
 	return (0);
 }
 
+/*
+ * Add a new outgoing edge the vertex "from" to the vertex "to".
+ *
+ * On success, this functions returns 0.
+ *
+ * On failure, this function returns -1.
+ */
 int
 topo_edge_new(topo_mod_t *mod, topo_vertex_t *from, topo_vertex_t *to)
 {
@@ -292,6 +375,16 @@ topo_edge_new(topo_mod_t *mod, topo_vertex_t *from, topo_vertex_t *to)
 	return (0);
 }
 
+/*
+ * This function can be used to iterate over all of the outgoing edges in
+ * for specified vertex.  The specified callback function is invoked for each
+ * edge.  Callback function should return the standard topo walker
+ * (TOPO_WALK_*) return values.
+ *
+ * On success, this function returns 0.
+ *
+ * On failure this function returns -1.
+ */
 int
 topo_edge_iter(topo_hdl_t *thp, topo_vertex_t *vtx,
     int (*func)(topo_hdl_t *, topo_edge_t *, boolean_t, void *), void *arg)
@@ -357,6 +450,7 @@ struct digraph_path
 	topo_path_t	*dgp_path;
 };
 
+/* Helper function for topo_digraph_paths() */
 static int
 visit_vertex(topo_hdl_t *thp, topo_vertex_t *vtx, topo_vertex_t *to,
     topo_list_t *all_paths, char *curr_path, topo_list_t *curr_path_comps,
@@ -522,6 +616,7 @@ err:
 	return (-1);
 }
 
+/* Helper function for path_fmri_nvl2str() */
 static ssize_t
 fmri_bufsz(nvlist_t *nvl)
 {

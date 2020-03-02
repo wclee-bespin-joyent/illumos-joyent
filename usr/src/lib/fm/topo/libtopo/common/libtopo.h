@@ -23,7 +23,7 @@
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 #ifndef _LIBTOPO_H
@@ -420,8 +420,6 @@ extern topo_digraph_t *topo_digraph_get(topo_hdl_t *, const char *);
 extern int topo_vertex_iter(topo_hdl_t *, topo_digraph_t *,
     int (*)(topo_hdl_t *, topo_vertex_t *, boolean_t, void *), void *);
 extern tnode_t *topo_vertex_node(topo_vertex_t *);
-extern int topo_vertex_find(topo_hdl_t *, topo_digraph_t *, topo_instance_t,
-    const char *, topo_list_t *);
 extern int topo_edge_iter(topo_hdl_t *, topo_vertex_t *,
     int (*)(topo_hdl_t *, topo_edge_t *, boolean_t, void *), void *);
 extern int topo_digraph_paths(topo_hdl_t *, topo_digraph_t *,

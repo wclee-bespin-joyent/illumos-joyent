@@ -10,11 +10,18 @@
  */
 
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 /*
- * XXX add comment
+ * This file implements the following two routines for serializing and
+ * deserializing digraphs to/from XML, respectively:
+ *
+ * topo_digraph_serialize()
+ * topo_digraph_deserialize()
+ *
+ * Refer to the following file for the XML schema being used:
+ * usr/src/lib/fm/topo/maps/common/digraph-topology.dtd.1
  */
 #include <time.h>
 #include <sys/utsname.h>
@@ -694,26 +701,15 @@ serialize_vertex(topo_hdl_t *thp, topo_vertex_t *vtx, boolean_t last_vtx,
 }
 
 /*
- * This function takes a topo_digraph_t and serializes in to  XML schema.  The
- * resulting XML uses the following schema:
+ * This function takes a topo_digraph_t and serializes it to XML.
  *
- * <fmri-scheme name='string' />
- * <vertices nelem: 'uint' >
- *     <vertex name='string' instance='uint64' fmri='string'>
- *         <nvpair name='property-groups' type='nvlist-array' nelem='uint'>
- *             <nvlist>
- *                 <nvpair . . ./>
- *                 . . .
- *             </nvlist>
- *             . . .
- *         </nvpair>
- *         <outgoing-edges nelem='uint'>
- *             <edge fmri='string' />
- *             . . .
- *         </outgoing-edges>
- *     </vertex>
- *     . . .
- * </vertices>
+ * The schema is described in detail in:
+ * usr/src/lib/fm/topo/maps/common/digraph-topology.dtd.1
+ *
+ * On success, this function writes the XML to the specified file and
+ * returns 0.
+ *
+ * On failure, this function returns -1.
  */
 int
 topo_digraph_serialize(topo_hdl_t *thp, topo_digraph_t *tdg, FILE *fp)
