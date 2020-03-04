@@ -428,6 +428,10 @@ vq_has_descs(struct vqueue_info *vq)
 	    vq->vq_avail->va_idx);
 }
 
+/*
+ * Deliver an interrupt to guest on the given virtual queue
+ * (if possible, or a generic MSI interrupt if not using MSI-X).
+ */
 #ifdef __FreeBSD__
 static inline void
 vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
@@ -467,10 +471,6 @@ vq_interrupt_impl(struct virtio_softc *vs, uint8_t isr, uint16_t msix_idx)
 }
 
 #ifndef __FreeBSD__
-/*
- * Deliver an interrupt to guest on the given virtual queue
- * (if possible, or a generic MSI interrupt if not using MSI-X).
- */
 static inline void
 vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
 {
