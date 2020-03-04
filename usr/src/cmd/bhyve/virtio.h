@@ -251,11 +251,9 @@ struct vring_used {
 
 /*
  * Bits in VTCFG_R_ISR.  These apply only if not using MSI-X.
- *
- * (We don't [yet?] ever use CONF_CHANGED.)
  */
 #define	VTCFG_ISR_QUEUES	0x01	/* re-scan queues */
-#define	VTCFG_ISR_CONF_CHANGED	0x80	/* configuration changed */
+#define	VTCFG_ISR_CONF_CHANGED	0x02	/* configuration changed */
 
 #define	VIRTIO_MSI_NO_VECTOR	0xFFFF
 
@@ -430,17 +428,22 @@ vq_has_descs(struct vqueue_info *vq)
 	    vq->vq_avail->va_idx);
 }
 
-/*
- * Deliver an interrupt to guest on the given virtual queue
- * (if possible, or a generic MSI interrupt if not using MSI-X).
- */
+#ifdef __FreeBSD__
 static inline void
 vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
+#else
+static inline void
+vq_interrupt_impl(struct virtio_softc *vs, uint8_t isr, uint16_t msix_idx)
+#endif
 {
 
-	if (pci_msix_enabled(vs->vs_pi))
+	if (pci_msix_enabled(vs->vs_pi)) {
+#ifdef __FreeBSD__
 		pci_generate_msix(vs->vs_pi, vq->vq_msix_idx);
-	else {
+#else
+		pci_generate_msix(vs->vs_pi, msix_idx);
+#endif
+	} else {
 #ifndef __FreeBSD__
 		boolean_t unlock = B_FALSE;
 
@@ -451,7 +454,7 @@ vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
 #else
 		VS_LOCK(vs);
 #endif
-		vs->vs_isr |= VTCFG_ISR_QUEUES;
+		vs->vs_isr |= isr;
 		pci_generate_msi(vs->vs_pi, 0);
 		pci_lintr_assert(vs->vs_pi);
 #ifndef __FreeBSD__
@@ -462,6 +465,18 @@ vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
 #endif
 	}
 }
+
+#ifndef __FreeBSD__
+/*
+ * Deliver an interrupt to guest on the given virtual queue
+ * (if possible, or a generic MSI interrupt if not using MSI-X).
+ */
+static inline void
+vq_interrupt(struct virtio_softc *vs, struct vqueue_info *vq)
+{
+	vq_interrupt_impl(vs, VTCFG_ISR_QUEUES, (vq)->vq_msix_idx);
+}
+#endif
 
 struct iovec;
 void	vi_softc_linkup(struct virtio_softc *vs, struct virtio_consts *vc,

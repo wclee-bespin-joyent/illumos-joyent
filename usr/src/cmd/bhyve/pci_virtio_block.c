@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
- * Copyright (c) 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,7 +39,6 @@
  * http://www.illumos.org/license/CDDL.
  *
  * Copyright 2014 Pluribus Networks Inc.
- * Copyright 2018 Joyent, Inc.
  */
 
 #include <sys/cdefs.h>
@@ -68,6 +67,9 @@ __FBSDID("$FreeBSD$");
 #include "pci_emul.h"
 #include "virtio.h"
 #include "block_if.h"
+#ifndef __FreeBSD__
+#include "mevent.h"
+#endif
 
 #define VTBLK_RINGSZ	128
 
@@ -327,6 +329,34 @@ pci_vtblk_notify(void *vsc, struct vqueue_info *vq)
 		pci_vtblk_proc(sc, vq);
 }
 
+#ifndef __FreeBSD__
+/*
+ * See section 4.1.5.4 of VirtIO 1.1 spec.
+ * https://docs.oasis-open.org/virtio/virtio/v1.1/csprd01/virtio-v1.1-csprd01.html
+ */
+static void
+pci_vtblk_resize(int fd, enum ev_type type, void *vsc)
+{
+	struct pci_vtblk_softc *sc = vsc;
+	struct virtio_softc *vs = &sc->vbsc_vs;
+	size_t newsize;
+	(void) fd;
+	(void) type;
+
+	if (blockif_check_size(sc->bc, &newsize) < 0) {
+		return;
+	}
+
+	sc->vbsc_cfg.vbc_capacity = newsize / DEV_BSIZE; /* 512-byte units */
+
+	/*
+	 * NO_VECTOR (0xffff) > MAX_MSIX_TABLE_ENTRIES (2048), so the NO_VECTOR
+	 * check happens, just later.
+	 */
+	vq_interrupt_impl(vs, VTCFG_ISR_CONF_CHANGED, vs->vs_msix_cfg_idx);
+}
+#endif
+
 static int
 pci_vtblk_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 {
@@ -434,6 +464,42 @@ pci_vtblk_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 		return (1);
 	}
 	vi_set_io_bar(&sc->vbsc_vs, 0);
+
+#ifndef __FreeBSD__
+	/*
+	 * This is a complete hack - every 5 seconds it fstat()s the backing
+	 * store to see if it is a different size than it was before.  If so, it
+	 * sends a config interrupt to the guest telling it to take a fresh look
+	 * at the config.  Presuming the guest does as told, the new size is
+	 * seen.
+	 *
+	 * Polling for size changes so frequently for something that almost
+	 * never happens is wasteful.  An alternative mechanism should be found.
+	 * Other mevents only allow you to poll for a file being ready for I/O.
+	 * We also have an inotify implementation, but it suffers from similar
+	 * limitations.
+	 *
+	 * It would be swell if spec_size_invalidate() (called by
+	 * zvol_size_changed()) would issue a sysevent.  However, the sysevent
+	 * is not visible in the zone because it lacks privileges, so a helper
+	 * would be needed.  If we are only thinking of Triton's use, vminfod
+	 * could be part of the plan.  vminfod would see the size invalidation
+	 * then could use bhyvectl to nudge the appropriate instance.  A
+	 * different approach may have the vmm module listening for that
+	 * sysevent and making an upcall to the bhyve program to tell it that
+	 * things have changed.  I don't know if there are examples of in-kernel
+	 * sysevent consumers.
+	 *
+	 * Note that changing the volsize already triggers a sysevent in most
+	 * cases.  This sysevent comes from the refreservation being changed as
+	 * a side effect of volsize being changed and does not happen under all
+	 * volsize changes.  Also, this sysevent is specific to zvols and if we
+	 * rely on it, other devices that back virtual disks would not benefit
+	 * from a solution that relies on the refreservation change.
+	 */
+	(void) mevent_add(5000, EVF_TIMER, pci_vtblk_resize, sc);
+#endif
+
 	return (0);
 }
 
