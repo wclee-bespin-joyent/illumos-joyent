@@ -1264,6 +1264,8 @@ f lib/amd64/libdevid.so.1 0755 root bin
 s lib/amd64/libdevid.so=libdevid.so.1
 f lib/amd64/libdevinfo.so.1 0755 root bin
 s lib/amd64/libdevinfo.so=libdevinfo.so.1
+f lib/amd64/libdhcpagent.so.1 0755 root bin
+s lib/amd64/libdhcpagent.so=libdhcpagent.so.1
 f lib/amd64/libdl.so.1 0755 root bin
 s lib/amd64/libdl.so=libdl.so.1
 f lib/amd64/libdladm.so.1 0755 root bin
@@ -12412,6 +12414,7 @@ f usr/share/man/man1m/gsscred.1m 0444 root bin
 f usr/share/man/man1m/gssd.1m 0444 root bin
 f usr/share/man/man1m/halt.1m 0444 root bin
 f usr/share/man/man1m/hostconfig.1m 0444 root bin
+f usr/share/man/man1m/hotplug.1m 0444 root bin
 f usr/share/man/man1m/id.1m 0444 root bin
 f usr/share/man/man1m/idmap.1m 0444 root bin
 f usr/share/man/man1m/idmapd.1m 0444 root bin
@@ -12650,6 +12653,7 @@ f usr/share/man/man1m/trapstat.1m 0444 root bin
 f usr/share/man/man1m/ttyadm.1m 0444 root bin
 f usr/share/man/man1m/ttymon.1m 0444 root bin
 f usr/share/man/man1m/tunefs.1m 0444 root bin
+f usr/share/man/man1m/tzreload.1m 0444 root bin
 f usr/share/man/man1m/tzselect.1m 0444 root bin
 f usr/share/man/man1m/uadmin.1m 0444 root bin
 f usr/share/man/man1m/ucodeadm.1m 0444 root bin
